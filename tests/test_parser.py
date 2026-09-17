@@ -39,17 +39,16 @@ class ScoreParserTests(unittest.TestCase):
             parse_score("@bpm 100\n\n1 X9")
         self.assertEqual(context.exception.line, 3)
 
-    def test_eight_is_high_do(self) -> None:
-        """`8` 应被解析为可独立绑定的第八个音符。"""
+    def test_eight_is_not_a_valid_note(self) -> None:
+        """独立高音 Do 已废弃，`8` 必须被拒绝。"""
 
-        score = parse_score("7 8:2")
-        self.assertEqual(score.notes[1].degree, 8)
-        self.assertEqual(score.notes[1].duration_beats, 2)
+        with self.assertRaises(ScoreParseError):
+            parse_score("7 8:2")
 
     def test_sharp_marks_semitone_modifier(self) -> None:
         """`#` 前缀应记录为半音修饰而不改变基础音符。"""
 
-        score = parse_score("#1 #H8:0.5")
+        score = parse_score("#1 #H7:0.5")
         self.assertTrue(score.notes[0].is_semitone)
         self.assertEqual(score.notes[0].degree, 1)
         self.assertTrue(score.notes[1].is_semitone)

@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QFrame, QLabel, QProgressBar, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QProgressBar, QVBoxLayout, QWidget
 
 
 _OVERLAY_STYLE = """
@@ -172,22 +172,44 @@ class PlaybackOverlay(_BaseOverlay):
         """初始化小型播放悬浮条。"""
 
         super().__init__()
-        self.setFixedSize(420, 86)
+        self.setFixedSize(500, 108)
         outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
         card = QFrame(objectName="card")
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(18, 13, 18, 12)
-        layout.setSpacing(6)
+        layout.setContentsMargins(20, 14, 20, 14)
+        layout.setSpacing(8)
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(12)
         self.title_label = QLabel("未命名曲谱")
         self.title_label.setStyleSheet("font-size: 14px; font-weight: 500;")
+        self.bpm_label = QLabel("100 BPM")
+        self.bpm_label.setObjectName("muted")
+        self.bpm_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        title_row.addWidget(self.title_label, 1)
+        title_row.addWidget(self.bpm_label)
+
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
         self.progress.setRange(0, 1000)
-        self.info_label = QLabel("F9 暂停    F10 停止")
-        self.info_label.setObjectName("muted")
-        layout.addWidget(self.title_label)
+
+        info_row = QHBoxLayout()
+        info_row.setSpacing(14)
+        self.status_label = QLabel("准备中")
+        self.note_label = QLabel("等待音符")
+        self.note_label.setObjectName("muted")
+        self.shortcut_label = QLabel("F9 暂停/继续    F10 停止")
+        self.shortcut_label.setObjectName("muted")
+        self.shortcut_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        info_row.addWidget(self.status_label)
+        info_row.addWidget(self.note_label)
+        info_row.addStretch()
+        info_row.addWidget(self.shortcut_label)
+
+        layout.addLayout(title_row)
         layout.addWidget(self.progress)
-        layout.addWidget(self.info_label)
+        layout.addLayout(info_row)
         outer.addWidget(card)
 
     def begin(self, title: str, bpm: int) -> None:
@@ -200,8 +222,10 @@ class PlaybackOverlay(_BaseOverlay):
         """
 
         self.title_label.setText(title)
+        self.bpm_label.setText(f"{bpm} BPM")
         self.progress.setValue(0)
-        self.info_label.setText(f"BPM {bpm}    F9 暂停    F10 停止")
+        self.status_label.setText("准备中")
+        self.note_label.setText("等待音符")
         self.show()
         self._move_top_center(32)
 
@@ -216,5 +240,5 @@ class PlaybackOverlay(_BaseOverlay):
         """
 
         self.progress.setValue(max(0, min(1000, int(ratio * 1000))))
-        status = "已暂停" if paused else "演奏中"
-        self.info_label.setText(f"{status}    {note_text}    F9 暂停/继续    F10 停止")
+        self.status_label.setText("已暂停" if paused else "演奏中")
+        self.note_label.setText(note_text)

@@ -3,7 +3,8 @@ __pycache__/
 .venv/
 .venv64/
 .artifacts/
-data/
+data/profile_state.json
+data/**/*.tmp
 build/
 dist/
 *.egg-info/

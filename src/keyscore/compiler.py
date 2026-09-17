@@ -8,11 +8,13 @@ from fractions import Fraction
 from .models import (
     ActionType,
     GameProfile,
+    MappingMode,
     NoteEvent,
     Octave,
     PlaybackPlan,
     Score,
     TimedInputEvent,
+    note_binding_key,
 )
 
 
@@ -59,9 +61,14 @@ def _append_note_events(
         PlanCompileError: 音符未配置按键时抛出。
     """
 
-    binding = profile.note_bindings.get(note.degree)
+    if profile.mapping_mode is MappingMode.DEGREE_MODIFIER:
+        binding = profile.note_bindings.get(note.degree)
+    else:
+        if profile.mapping_mode is MappingMode.ROW_OCTAVE and note.is_semitone:
+            raise PlanCompileError("三行音区直接映射不支持半音；请改用直接音符映射")
+        binding = profile.direct_note_bindings.get(note_binding_key(note))
     if binding is None:
-        raise PlanCompileError(f"音符 {note.degree} 没有配置按键")
+        raise PlanCompileError(f"音符 {note.octave.value} {note.degree} 没有配置按键")
     hold_ms = min(
         float(profile.key_hold_ms),
         max(1.0, note_duration_ms - float(profile.key_gap_ms)),
@@ -97,22 +104,23 @@ def compile_score(score: Score, profile: GameProfile) -> PlaybackPlan:
         start_ms = _milliseconds(start_beat, score.bpm)
         shortest_duration_ms = min(_milliseconds(note.duration_beats, score.bpm) for note in notes)
         transition_ms = min(float(profile.zone_delay_ms), shortest_duration_ms * 0.25)
-        octaves = {note.octave for note in notes}
-        semitone_states = {note.is_semitone for note in notes}
-        if len(octaves) > 1:
-            raise PlanCompileError("同一和弦不能混合低音、中音或高音修饰")
-        if len(semitone_states) > 1:
-            raise PlanCompileError("同一和弦不能混合自然音和半音修饰")
-
-        octave = next(iter(octaves))
         modifiers = []
-        if octave is not Octave.MIDDLE:
-            zone_binding = profile.zone_bindings.get(octave)
-            if zone_binding is None:
-                raise PlanCompileError(f"音区 {octave.value} 没有配置修饰键")
-            modifiers.append(zone_binding)
-        if next(iter(semitone_states)):
-            modifiers.append(profile.semitone_binding)
+        if profile.mapping_mode is MappingMode.DEGREE_MODIFIER:
+            octaves = {note.octave for note in notes}
+            semitone_states = {note.is_semitone for note in notes}
+            if len(octaves) > 1:
+                raise PlanCompileError("当前方案的全局音区修饰键不能表达跨音区和弦")
+            if len(semitone_states) > 1:
+                raise PlanCompileError("当前方案的全局半音修饰键不能表达自然音和半音混合和弦")
+
+            octave = next(iter(octaves))
+            if octave is not Octave.MIDDLE:
+                zone_binding = profile.zone_bindings.get(octave)
+                if zone_binding is None:
+                    raise PlanCompileError(f"音区 {octave.value} 没有配置修饰键")
+                modifiers.append(zone_binding)
+            if next(iter(semitone_states)):
+                modifiers.append(profile.semitone_binding)
 
         for modifier in modifiers:
             output.append(TimedInputEvent(start_ms, ActionType.PRESS, modifier))

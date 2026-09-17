@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 
 from keyscore.compiler import PlanCompileError, compile_score
-from keyscore.models import ActionType, default_profile
+from keyscore.models import ActionType, MappingMode, default_profile, note_binding_key
 from keyscore.parser import parse_score
 
 
@@ -60,11 +60,33 @@ class CompilerTests(unittest.TestCase):
         profile = default_profile()
         profile.key_hold_ms = 100
         profile.key_gap_ms = 10
-        plan = compile_score(parse_score("@bpm 120\n8:0.1 8:0.1"), profile)
+        plan = compile_score(parse_score("@bpm 120\n7:0.1 7:0.1"), profile)
         note_events = [event for event in plan.events if event.note is not None]
         self.assertEqual(note_events[1].timestamp_ms, 40.0)
         self.assertEqual(note_events[2].timestamp_ms, 50.0)
 
+    def test_direct_note_mapping_allows_cross_octave_chord(self) -> None:
+        """直接映射方案应能表达不同音区构成的同一和弦。"""
+
+        score = parse_score("[L1 H1]")
+        profile = default_profile()
+        profile.mapping_mode = MappingMode.DIRECT_NOTE
+        for note in score.notes:
+            profile.direct_note_bindings[note_binding_key(note)] = profile.note_bindings[note.degree]
+        plan = compile_score(score, profile)
+        presses = [event for event in plan.events if event.action is ActionType.PRESS]
+        self.assertEqual(len(presses), 2)
+        self.assertTrue(all(event.timestamp_ms == 0 for event in presses))
+
+    def test_row_octave_mapping_rejects_semitone(self) -> None:
+        """三行音区模式只有三行自然音，不应读取隐藏的半音绑定。"""
+
+        score = parse_score("#1")
+        profile = default_profile()
+        profile.mapping_mode = MappingMode.ROW_OCTAVE
+        profile.direct_note_bindings[note_binding_key(score.notes[0])] = profile.note_bindings[1]
+        with self.assertRaisesRegex(PlanCompileError, "不支持半音"):
+            compile_score(score, profile)
 
 if __name__ == "__main__":
     unittest.main()

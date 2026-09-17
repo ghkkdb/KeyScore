@@ -86,7 +86,7 @@ class ScoreLibrary:
             score = parse_score(text)
         except ScoreParseError as exc:
             raise ValueError(str(exc)) from exc
-        destination = self._unique_path(source.stem)
+        destination = self._unique_path(score.title)
         shutil.copy2(source, destination)
         return ScoreEntry(score.title, destination)
 
@@ -104,10 +104,27 @@ class ScoreLibrary:
         path = self._unique_path(title)
         path.write_text(
             f"@title {title}\n@bpm 100\n@beat 4/4\n@section_gap 2\n\n"
-            "1 2 3 4 | 5 6 7 8 |\n---\n1 2 3 4 |\n",
+            "1 2 3 4 | 5 6 7 H1 |\n---\n1 2 3 4 |\n",
             encoding="utf-8",
         )
         return ScoreEntry(title, path)
+
+    def delete_score(self, entry: ScoreEntry) -> None:
+        """
+        删除曲谱库中的指定曲谱文件。
+
+        Args:
+            entry (ScoreEntry): 待删除的本地曲谱条目。
+
+        Raises:
+            ValueError: 条目不属于当前曲谱库时抛出。
+            OSError: 删除文件失败时抛出。
+        """
+
+        path = entry.path.resolve()
+        if path.parent != self.scores_directory.resolve() or path.suffix.lower() != ".txt":
+            raise ValueError("只能删除当前曲谱库中的文本曲谱")
+        path.unlink()
 
     def _unique_path(self, stem: str) -> Path:
         """
@@ -120,8 +137,7 @@ class ScoreLibrary:
             Path: 可用目标路径。
         """
 
-        safe_stem = "".join(character for character in stem if character not in '<>:"/\\|?*').strip()
-        safe_stem = safe_stem or "score"
+        safe_stem = _safe_score_stem(stem)
         candidate = self.scores_directory / f"{safe_stem}.txt"
         suffix = 2
         while candidate.exists():
@@ -140,3 +156,48 @@ class ScoreLibrary:
             "1 1 5 5 | 6 6 5:2 |\n---\n4 4 3 3 | 2 2 1:2 |\n",
             encoding="utf-8",
         )
+
+
+def rename_score_file(path: Path, title: str) -> Path:
+    """
+    按曲谱标题安全重命名本地 `.txt` 文件。
+
+    Args:
+        path (Path): 当前曲谱文件路径。
+        title (str): 已解析的曲谱标题。
+
+    Returns:
+        Path: 重命名后的实际路径。
+
+    Raises:
+        OSError: 文件重命名失败时抛出。
+        ValueError: 目标不是 `.txt` 曲谱时抛出。
+    """
+
+    if path.suffix.lower() != ".txt":
+        raise ValueError("只能重命名 .txt 曲谱文件")
+    safe_stem = _safe_score_stem(title)
+    destination = path.with_name(f"{safe_stem}.txt")
+    if destination.resolve() == path.resolve():
+        return path
+    suffix = 2
+    while destination.exists():
+        destination = path.with_name(f"{safe_stem} {suffix}.txt")
+        suffix += 1
+    path.rename(destination)
+    return destination
+
+
+def _safe_score_stem(value: str) -> str:
+    """
+    将曲谱标题转换为安全的 Windows 文件名主体。
+
+    Args:
+        value (str): 曲谱标题或期望文件名主体。
+
+    Returns:
+        str: 移除非法字符后的非空文件名主体。
+    """
+
+    safe_stem = "".join(character for character in value if character not in '<>:"/\\|?*').strip()
+    return safe_stem.rstrip(". ") or "未命名曲谱"

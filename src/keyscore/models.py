@@ -22,6 +22,14 @@ class ZoneMode(str, Enum):
     COMBINATION = "combination"
 
 
+class MappingMode(str, Enum):
+    """表示游戏乐器将音符转换为输入的规则。"""
+
+    DEGREE_MODIFIER = "degree_modifier"
+    DIRECT_NOTE = "direct_note"
+    ROW_OCTAVE = "row_octave"
+
+
 class BindingKind(str, Enum):
     """表示绑定的输入设备类型。"""
 
@@ -90,7 +98,7 @@ class PlaybackPlan:
 
 @dataclass
 class GameProfile:
-    """描述游戏的音符、音区和播放参数。"""
+    """描述一个可独立保存的游戏按键配置方案。"""
 
     name: str
     note_bindings: dict[int, Binding]
@@ -102,12 +110,28 @@ class GameProfile:
     key_gap_ms: int = 10
     zone_delay_ms: int = 35
     zone_click_ms: int = 20
+    mapping_mode: MappingMode = MappingMode.DEGREE_MODIFIER
+    direct_note_bindings: dict[str, Binding] = field(default_factory=dict)
     metadata: dict[str, str] = field(default_factory=dict)
+
+
+def note_binding_key(note: NoteEvent) -> str:
+    """
+    返回直接音符映射使用的稳定键名。
+
+    Args:
+        note (NoteEvent): 要转换的内部音符。
+
+    Returns:
+        str: 由音区、半音状态和音级构成的键名。
+    """
+
+    return f"{note.octave.value}:{int(note.is_semitone)}:{note.degree}"
 
 
 def default_profile() -> GameProfile:
     """
-    创建使用 A、S、D、F、G、H、J、K 扫描码的默认配置。
+    创建使用 A、S、D、F、G、H、J 扫描码的默认配置。
 
     Returns:
         GameProfile: 适合进行首次调试的默认游戏配置。
@@ -121,9 +145,8 @@ def default_profile() -> GameProfile:
         5: 0x22,
         6: 0x23,
         7: 0x24,
-        8: 0x25,
     }
-    labels = {1: "A", 2: "S", 3: "D", 4: "F", 5: "G", 6: "H", 7: "J", 8: "K"}
+    labels = {1: "A", 2: "S", 3: "D", 4: "F", 5: "G", 6: "H", 7: "J"}
     return GameProfile(
         name="默认配置",
         note_bindings={

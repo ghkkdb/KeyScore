@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .library import rename_score_file
 from .parser import ScoreParseError, parse_score
 
 
@@ -48,7 +49,7 @@ class ScoreEditorWindow(QMainWindow):
         header = QHBoxLayout()
         title = QLabel("曲谱编辑")
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
-        syntax = QLabel("# 半音   8 高音 Do   L 低音   H 高音   :2 两拍   --- 段落")
+        syntax = QLabel("# 半音   L 低音   H 高音   :2 两拍   --- 段落")
         syntax.setObjectName("muted")
         header.addWidget(title)
         header.addStretch()
@@ -125,7 +126,17 @@ class ScoreEditorWindow(QMainWindow):
         self.editor.setFocus()
 
     def save(self) -> None:
-        """校验并保存当前曲谱，失败时显示错误对话框。"""
+        """经用户确认后校验并保存曲谱，成功后关闭编辑窗口。"""
+
+        result = QMessageBox.question(
+            self,
+            "保存并关闭？",
+            "确定保存当前曲谱并关闭编辑窗口吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes,
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            return
 
         try:
             score = parse_score(self.editor.toPlainText())
@@ -134,12 +145,14 @@ class ScoreEditorWindow(QMainWindow):
             return
         try:
             self.path.write_text(self.editor.toPlainText(), encoding="utf-8")
-        except OSError as exc:
+            self.path = rename_score_file(self.path, score.title)
+        except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "保存失败", str(exc))
             return
         self.editor.document().setModified(False)
         self.setWindowTitle(f"编辑 · {score.title}")
         self.saved.emit(self.path)
+        self.close()
 
     def _validate(self) -> None:
         """实时显示曲谱语法检查结果。"""
@@ -172,7 +185,7 @@ class ScoreEditorWindow(QMainWindow):
             QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
-        if result is QMessageBox.StandardButton.Discard:
+        if result == QMessageBox.StandardButton.Discard:
             event.accept()
         else:
             event.ignore()

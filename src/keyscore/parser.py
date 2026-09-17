@@ -11,7 +11,7 @@ from .models import NoteEvent, Octave, Score
 
 _TOKEN_PATTERN = re.compile(r"\[[^\]]+\](?::\d+(?:\.\d+)?)?|[^\s|]+|\|")
 _NOTE_PATTERN = re.compile(
-    r"^(?P<sharp>#?)(?P<octave>[LH]?)(?P<degree>[0-8])(?::(?P<duration>\d+(?:\.\d+)?))?$"
+    r"^(?P<sharp>#?)(?P<octave>[LH]?)(?P<degree>[0-7])(?::(?P<duration>\d+(?:\.\d+)?))?$"
 )
 _CHORD_PATTERN = re.compile(r"^\[(?P<body>[^\]]+)\](?::(?P<duration>\d+(?:\.\d+)?))?$")
 
