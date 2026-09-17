@@ -16,8 +16,11 @@ def main() -> int:
     try:
         from PySide6.QtGui import QFont, QFontDatabase
         from PySide6.QtWidgets import QApplication
-    except ImportError:
-        print("缺少 PySide6，请先执行：pip install -r requirements.txt", file=sys.stderr)
+    except ImportError as error:
+        print(
+            f"无法加载 PySide6：{error}\n请先执行：pip install -r requirements.txt",
+            file=sys.stderr,
+        )
         return 1
 
     from .main_window import MainWindow

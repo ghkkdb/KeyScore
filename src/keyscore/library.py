@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +30,8 @@ def default_data_directory() -> Path:
     configured = os.environ.get("KEYSCORE_DATA_DIR")
     if configured:
         return Path(configured).expanduser().resolve()
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "data"
     return Path(__file__).resolve().parents[2] / "data"
 
 

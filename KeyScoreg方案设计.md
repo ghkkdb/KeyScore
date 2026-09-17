@@ -669,3 +669,47 @@ actual_hold_ms = min(
 ```
 
 因此即使用户将按键时长设得过大，播放器也会在下一个音符前自动松键。如果游戏出现漏键，优先将最小释放间隔从 10ms 逐步提高到 20～40ms；如果游戏没有识别短按，则逐步增加按键时长。
+
+### 十六、测试版打包与发布
+
+Windows 测试版统一使用项目根目录的 `build_test.ps1` 构建，目标平台为 Windows x64。构建工具使用 PyInstaller，但 PyInstaller 仅作为开发期构建工具，不属于应用运行依赖。
+
+打包采用 `onedir` 目录模式，不采用单文件模式。原因是配置方案、曲谱和当前方案状态都需要在运行期间持久化；目录模式可以让 EXE 同级的 `data` 保持为普通可写目录，也便于测试人员直接检查、导入和备份数据。
+
+```text
+dist/KeyScore-Test/
+├── KeyScore-Test.exe
+├── _internal/                 Python 与必要运行依赖
+└── data/
+    ├── profiles/              随测试版发布的配置方案
+    └── scores/                随测试版发布的示例曲谱
+```
+
+冻结运行时的数据目录固定为 `KeyScore-Test.exe` 同级的 `data`。源码方式启动时仍使用项目根目录的 `data`；显式设置 `KEYSCORE_DATA_DIR` 时优先使用该路径。
+
+依赖收集遵循最小化原则：
+
+1. 只保留应用实际使用的 PySide6 `QtCore`、`QtGui`、`QtWidgets`、Windows 平台插件，以及 `pynput` 和 Python 运行时。
+2. 排除 Qt Multimedia、Network、OpenGL、PDF、QML、Quick、WebEngine 和 tkinter 等当前功能未使用的模块。
+3. 删除虚拟键盘、图片格式、通用触摸等未使用插件，只保留 `qwindows.dll` 和 Windows 样式插件。
+4. Qt 翻译只保留简体中文文件。
+5. 构建期间隔离系统 `PATH`，防止 Anaconda、PDF 工具或其他软件的同名 DLL 被错误收集；构建后额外移除误收集的 ICU DLL。
+6. 发布包包含 `data/profiles/*.ksprofile.json` 和 `data/scores/*.txt`，不包含设备相关的 `profile_state.json` 或临时文件。
+
+标准构建命令：
+
+```powershell
+.\build_test.ps1
+```
+
+交付前必须完成以下验证：
+
+```text
+运行全部单元测试
+检查配置方案和曲谱已复制到 data
+检查未混入非项目 ICU DLL
+启动 EXE 并保持运行至少 5 秒
+关闭测试进程后生成 Win64 ZIP
+```
+
+测试版发布到 GitHub Releases，并标记为预发布。标签使用 `v主版本.次版本.修订版本-test.序号`，例如 `v0.1.0-test.1`。发布附件使用 `KeyScore-Test-win64.zip`；使用者必须完整解压后运行，不能只复制 EXE。
