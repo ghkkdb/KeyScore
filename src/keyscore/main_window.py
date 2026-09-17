@@ -44,6 +44,7 @@ from .models import (
     Binding,
     MappingMode,
     NoteEvent,
+    NoteOutputMode,
     Octave,
     PlaybackPlan,
     TimedInputEvent,
@@ -875,6 +876,11 @@ class MainWindow(QMainWindow):
         rebuild_mapping()
 
         options = QFormLayout()
+        output_mode_combo = QComboBox()
+        output_mode_combo.addItem("短按触发（推荐）", NoteOutputMode.TAP.value)
+        output_mode_combo.addItem("持续按住", NoteOutputMode.HOLD.value)
+        output_mode_index = output_mode_combo.findData(self.profile.note_output_mode.value)
+        output_mode_combo.setCurrentIndex(max(0, output_mode_index))
         hold_spin = QSpinBox()
         hold_spin.setRange(10, 500)
         hold_spin.setSuffix(" ms")
@@ -883,9 +889,24 @@ class MainWindow(QMainWindow):
         gap_spin.setRange(0, 200)
         gap_spin.setSuffix(" ms")
         gap_spin.setValue(self.profile.key_gap_ms)
+        options.addRow("音符输出方式", output_mode_combo)
         options.addRow("按键时长", hold_spin)
         options.addRow("最小释放间隔", gap_spin)
         layout.addLayout(options)
+
+        def update_hold_control() -> None:
+            """根据输出方式启用或禁用固定按键时长。"""
+
+            is_tap = output_mode_combo.currentData() == NoteOutputMode.TAP.value
+            hold_spin.setEnabled(is_tap)
+            hold_spin.setToolTip(
+                "短按触发时使用固定按键时长"
+                if is_tap
+                else "持续按住模式由曲谱音符时值决定按键时长"
+            )
+
+        output_mode_combo.currentIndexChanged.connect(update_hold_control)
+        update_hold_control()
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
@@ -914,8 +935,11 @@ class MainWindow(QMainWindow):
         self.profile.semitone_binding = semitone_binding
         try:
             self.profile.mapping_mode = MappingMode(str(mode_combo.currentData()))
+            self.profile.note_output_mode = NoteOutputMode(
+                str(output_mode_combo.currentData())
+            )
         except ValueError:
-            QMessageBox.warning(self, "设置保存失败", "未知的映射模式")
+            QMessageBox.warning(self, "设置保存失败", "未知的映射或音符输出模式")
             return
         self.profile.direct_note_bindings = direct_bindings
         self.profile.key_hold_ms = hold_spin.value()

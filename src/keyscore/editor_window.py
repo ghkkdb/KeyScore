@@ -49,7 +49,7 @@ class ScoreEditorWindow(QMainWindow):
         header = QHBoxLayout()
         title = QLabel("曲谱编辑")
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
-        syntax = QLabel("# 半音   L 低音   H 高音   :2 两拍   --- 段落")
+        syntax = QLabel("# 半音   L 低音   H 高音   - 延一拍   --- 段落")
         syntax.setObjectName("muted")
         header.addWidget(title)
         header.addStretch()
@@ -67,6 +67,7 @@ class ScoreEditorWindow(QMainWindow):
         insert_hint.setObjectName("muted")
         insert_bar.addWidget(insert_hint)
         for label, token in (
+            ("延长 1 拍", "-"),
             ("休止 ½ 拍", "0:0.5"),
             ("休止 1 拍", "0"),
             ("休止 2 拍", "0:2"),

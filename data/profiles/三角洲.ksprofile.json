@@ -1,7 +1,8 @@
 {
-  "version": 2,
+  "version": 3,
   "name": "三角洲",
-  "mapping_mode": "degree_modifier",
+  "mapping_mode": "row_octave",
+  "note_output_mode": "hold",
   "zone_mode": "combination",
   "initial_zone": "middle",
   "key_hold_ms": 50,

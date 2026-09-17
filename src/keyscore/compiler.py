@@ -10,6 +10,7 @@ from .models import (
     GameProfile,
     MappingMode,
     NoteEvent,
+    NoteOutputMode,
     Octave,
     PlaybackPlan,
     Score,
@@ -69,9 +70,11 @@ def _append_note_events(
         binding = profile.direct_note_bindings.get(note_binding_key(note))
     if binding is None:
         raise PlanCompileError(f"音符 {note.octave.value} {note.degree} 没有配置按键")
-    hold_ms = min(
-        float(profile.key_hold_ms),
-        max(1.0, note_duration_ms - float(profile.key_gap_ms)),
+    available_hold_ms = max(1.0, note_duration_ms - float(profile.key_gap_ms))
+    hold_ms = (
+        available_hold_ms
+        if profile.note_output_mode is NoteOutputMode.HOLD
+        else min(float(profile.key_hold_ms), available_hold_ms)
     )
     output.append(TimedInputEvent(note_start_ms, ActionType.PRESS, binding, note))
     release_ms = note_start_ms + hold_ms

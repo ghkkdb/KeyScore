@@ -1,7 +1,8 @@
 {
-  "version": 2,
+  "version": 3,
   "name": "三行",
   "mapping_mode": "row_octave",
+  "note_output_mode": "tap",
   "zone_mode": "combination",
   "initial_zone": "middle",
   "key_hold_ms": 50,

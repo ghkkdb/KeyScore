@@ -7,7 +7,13 @@ import unittest
 from pathlib import Path
 
 from keyscore.library import ScoreLibrary, rename_score_file
-from keyscore.models import Binding, BindingKind, MappingMode, default_profile
+from keyscore.models import (
+    Binding,
+    BindingKind,
+    MappingMode,
+    NoteOutputMode,
+    default_profile,
+)
 from keyscore.profile_store import (
     import_profile,
     list_profile_paths,
@@ -86,6 +92,7 @@ class LibraryTests(unittest.TestCase):
             root = Path(directory)
             profile = default_profile()
             profile.mapping_mode = MappingMode.DIRECT_NOTE
+            profile.note_output_mode = NoteOutputMode.HOLD
             profile.direct_note_bindings["middle:0:1"] = Binding(
                 BindingKind.KEYBOARD, 0x10, "Q"
             )
@@ -93,8 +100,21 @@ class LibraryTests(unittest.TestCase):
             save_profile(profile, path)
             restored = load_profile(path)
             self.assertEqual(restored.mapping_mode, MappingMode.DIRECT_NOTE)
+            self.assertEqual(restored.note_output_mode, NoteOutputMode.HOLD)
             self.assertEqual(restored.direct_note_bindings, profile.direct_note_bindings)
             self.assertEqual(list_profile_paths(root), [path])
+
+    def test_legacy_profile_defaults_to_tap_output(self) -> None:
+        """缺少输出方式字段的旧 Profile 应保持原有短按行为。"""
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "旧配置.ksprofile.json"
+            profile = default_profile()
+            save_profile(profile, path)
+            text = path.read_text(encoding="utf-8")
+            text = text.replace('  "note_output_mode": "tap",\n', "")
+            path.write_text(text, encoding="utf-8")
+            self.assertEqual(load_profile(path).note_output_mode, NoteOutputMode.TAP)
 
     def test_virtual_piano_profile_migrates_to_direct_note(self) -> None:
         """已移除的虚拟钢琴模式应兼容迁移为直接音符映射。"""

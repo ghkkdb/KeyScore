@@ -5,7 +5,13 @@ from __future__ import annotations
 import unittest
 
 from keyscore.compiler import PlanCompileError, compile_score
-from keyscore.models import ActionType, MappingMode, default_profile, note_binding_key
+from keyscore.models import (
+    ActionType,
+    MappingMode,
+    NoteOutputMode,
+    default_profile,
+    note_binding_key,
+)
 from keyscore.parser import parse_score
 
 
@@ -64,6 +70,36 @@ class CompilerTests(unittest.TestCase):
         note_events = [event for event in plan.events if event.note is not None]
         self.assertEqual(note_events[1].timestamp_ms, 40.0)
         self.assertEqual(note_events[2].timestamp_ms, 50.0)
+
+    def test_tap_mode_uses_fixed_key_hold_duration(self) -> None:
+        """短按触发模式不应因为音符时值较长而延长实际按键。"""
+
+        profile = default_profile()
+        plan = compile_score(parse_score("@bpm 120\n1:2"), profile)
+        note_events = [event for event in plan.events if event.note is not None]
+        self.assertEqual(note_events[1].timestamp_ms, 50.0)
+
+    def test_hold_mode_uses_note_duration(self) -> None:
+        """持续按住模式应保持到音符结束前的最小释放间隔。"""
+
+        profile = default_profile()
+        profile.note_output_mode = NoteOutputMode.HOLD
+        profile.key_gap_ms = 10
+        plan = compile_score(parse_score("@bpm 120\n1:2 2"), profile)
+        note_events = [event for event in plan.events if event.note is not None]
+        self.assertEqual(note_events[1].timestamp_ms, 990.0)
+        self.assertEqual(note_events[2].timestamp_ms, 1000.0)
+
+    def test_hold_mode_uses_sustain_dash_duration(self) -> None:
+        """持续按住模式应使用增时线扩展后的完整音符时值。"""
+
+        profile = default_profile()
+        profile.note_output_mode = NoteOutputMode.HOLD
+        profile.key_gap_ms = 10
+        plan = compile_score(parse_score("@bpm 120\n1 - - - 2"), profile)
+        note_events = [event for event in plan.events if event.note is not None]
+        self.assertEqual(note_events[1].timestamp_ms, 1990.0)
+        self.assertEqual(note_events[2].timestamp_ms, 2000.0)
 
     def test_direct_note_mapping_allows_cross_octave_chord(self) -> None:
         """直接映射方案应能表达不同音区构成的同一和弦。"""

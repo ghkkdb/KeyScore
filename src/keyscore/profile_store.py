@@ -10,6 +10,7 @@ from .models import (
     BindingKind,
     GameProfile,
     MappingMode,
+    NoteOutputMode,
     Octave,
     ZoneMode,
     default_profile,
@@ -27,9 +28,10 @@ def save_profile(profile: GameProfile, path: Path) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "version": 2,
+        "version": 3,
         "name": profile.name,
         "mapping_mode": profile.mapping_mode.value,
+        "note_output_mode": profile.note_output_mode.value,
         "zone_mode": profile.zone_mode.value,
         "initial_zone": profile.initial_zone.value,
         "key_hold_ms": profile.key_hold_ms,
@@ -134,6 +136,9 @@ def load_profile_strict(path: Path) -> GameProfile:
         ),
         zone_mode=ZoneMode(payload.get("zone_mode", ZoneMode.COMBINATION.value)),
         initial_zone=Octave(payload.get("initial_zone", Octave.MIDDLE.value)),
+        note_output_mode=NoteOutputMode(
+            payload.get("note_output_mode", NoteOutputMode.TAP.value)
+        ),
         key_hold_ms=int(payload.get("key_hold_ms", 50)),
         key_gap_ms=int(payload.get("key_gap_ms", 10)),
         zone_delay_ms=int(payload.get("zone_delay_ms", 35)),

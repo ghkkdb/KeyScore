@@ -81,6 +81,31 @@ class ScoreParserTests(unittest.TestCase):
             parse_score("@section_gap 0\n1\n---\n2")
         self.assertEqual(context.exception.line, 1)
 
+    def test_sustain_dashes_extend_previous_note(self) -> None:
+        """每个增时线应给前一个音符增加一拍且不重复触发。"""
+
+        score = parse_score("1 - - - | 2")
+        self.assertEqual(len(score.notes), 2)
+        self.assertEqual(score.notes[0].duration_beats, 4)
+        self.assertEqual(score.notes[1].start_beat, 4)
+        self.assertEqual(score.total_beats, 5)
+
+    def test_sustain_dash_extends_chord_and_rest(self) -> None:
+        """增时线应同时延长和弦内音符，也应能延长休止时间。"""
+
+        score = parse_score("[1 3 5] - | 0 - 2")
+        self.assertTrue(all(note.duration_beats == 2 for note in score.notes[:3]))
+        self.assertEqual(score.notes[3].start_beat, 4)
+        self.assertEqual(score.total_beats, 5)
+
+    def test_sustain_dash_requires_previous_value(self) -> None:
+        """曲谱开头或段落停顿后的增时线应给出明确错误。"""
+
+        with self.assertRaisesRegex(ScoreParseError, "增时线前"):
+            parse_score("- 1")
+        with self.assertRaisesRegex(ScoreParseError, "增时线前"):
+            parse_score("1\n---\n- 2")
+
 
 if __name__ == "__main__":
     unittest.main()

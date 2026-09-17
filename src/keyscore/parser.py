@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fractions import Fraction
 
 from .models import NoteEvent, Octave, Score
@@ -193,14 +193,27 @@ def parse_score(text: str) -> Score:
 
     position = Fraction(0)
     notes: list[NoteEvent] = []
+    extendable_note_indices: list[int] | None = None
     for line_number, line in score_lines:
         if line == "---":
             position += section_gap
+            extendable_note_indices = None
             continue
         for token in _TOKEN_PATTERN.findall(line):
             if token == "|":
                 continue
+            if token == "-":
+                if extendable_note_indices is None:
+                    raise ScoreParseError("增时线前必须有音符、和弦或休止符", line_number, token)
+                for note_index in extendable_note_indices:
+                    notes[note_index] = replace(
+                        notes[note_index],
+                        duration_beats=notes[note_index].duration_beats + 1,
+                    )
+                position += 1
+                continue
             parsed = _parse_token(token, line_number)
+            first_note_index = len(notes)
             for degree, octave, is_semitone in parsed.notes:
                 notes.append(
                     NoteEvent(
@@ -211,6 +224,7 @@ def parse_score(text: str) -> Score:
                         is_semitone=is_semitone,
                     )
                 )
+            extendable_note_indices = list(range(first_note_index, len(notes)))
             position += parsed.duration
 
     if position == 0:

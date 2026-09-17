@@ -30,6 +30,13 @@ class MappingMode(str, Enum):
     ROW_OCTAVE = "row_octave"
 
 
+class NoteOutputMode(str, Enum):
+    """表示音符按键采用固定短按还是随时值持续按住。"""
+
+    TAP = "tap"
+    HOLD = "hold"
+
+
 class BindingKind(str, Enum):
     """表示绑定的输入设备类型。"""
 
@@ -106,6 +113,7 @@ class GameProfile:
     semitone_binding: Binding
     zone_mode: ZoneMode = ZoneMode.COMBINATION
     initial_zone: Octave = Octave.MIDDLE
+    note_output_mode: NoteOutputMode = NoteOutputMode.TAP
     key_hold_ms: int = 50
     key_gap_ms: int = 10
     zone_delay_ms: int = 35
