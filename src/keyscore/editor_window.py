@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent, QFont, QTextCursor
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -19,6 +20,8 @@ from PySide6.QtWidgets import (
 
 from .library import rename_score_file
 from .parser import ScoreParseError, parse_score
+from .score_editing import set_total_duration
+from .theme import set_widget_state
 
 
 class ScoreEditorWindow(QMainWindow):
@@ -48,8 +51,8 @@ class ScoreEditorWindow(QMainWindow):
         layout.setSpacing(12)
         header = QHBoxLayout()
         title = QLabel("曲谱编辑")
-        title.setStyleSheet("font-size: 18px; font-weight: 600;")
-        syntax = QLabel("# 半音   L 低音   H 高音   - 延一拍   --- 段落")
+        title.setObjectName("dialogTitle")
+        syntax = QLabel("# 半音   L 低音   H 高音   ( ) 连音   - 延一拍   --- 段落")
         syntax.setObjectName("muted")
         header.addWidget(title)
         header.addStretch()
@@ -62,11 +65,35 @@ class ScoreEditorWindow(QMainWindow):
         self.editor.setFont(font)
         self.editor.textChanged.connect(self._validate)
 
+        duration_bar = QHBoxLayout()
+        duration_hint = QLabel("总时值")
+        duration_hint.setObjectName("muted")
+        duration_bar.addWidget(duration_hint)
+        for label, duration in (
+            ("¼ 拍", "0.25"),
+            ("½ 拍", "0.5"),
+            ("¾ 拍", "0.75"),
+            ("1 拍", "1"),
+            ("1½ 拍", "1.5"),
+            ("2 拍", "2"),
+        ):
+            button = QPushButton(label)
+            button.setToolTip("设置光标所在或选中音符的总时值")
+            button.clicked.connect(
+                lambda _checked=False, value=duration: self._set_total_duration(value)
+            )
+            duration_bar.addWidget(button)
+        custom_duration_button = QPushButton("自定义…")
+        custom_duration_button.clicked.connect(self._set_custom_duration)
+        duration_bar.addWidget(custom_duration_button)
+        duration_bar.addStretch()
+
         insert_bar = QHBoxLayout()
         insert_hint = QLabel("插入")
         insert_hint.setObjectName("muted")
         insert_bar.addWidget(insert_hint)
         for label, token in (
+            ("小节 |", "|"),
             ("延长 1 拍", "-"),
             ("休止 ½ 拍", "0:0.5"),
             ("休止 1 拍", "0"),
@@ -91,6 +118,7 @@ class ScoreEditorWindow(QMainWindow):
         footer.addStretch()
         footer.addWidget(save_button)
         layout.addLayout(header)
+        layout.addLayout(duration_bar)
         layout.addLayout(insert_bar)
         layout.addWidget(self.editor, 1)
         layout.addLayout(footer)
@@ -125,6 +153,57 @@ class ScoreEditorWindow(QMainWindow):
         cursor.insertText("\n---\n")
         self.editor.setTextCursor(cursor)
         self.editor.setFocus()
+
+    def _set_total_duration(self, duration: str) -> None:
+        """
+        设置光标所在或选择区域内音符的精确总时值。
+
+        Args:
+            duration (str): 大于零的整数或小数拍数。
+        """
+
+        cursor = self.editor.textCursor()
+        source = self.editor.toPlainText()
+        try:
+            result = set_total_duration(
+                source,
+                cursor.selectionStart(),
+                cursor.selectionEnd(),
+                duration,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "时值无效", str(exc))
+            return
+        if result.changed_count == 0:
+            self.validation_label.setText("请将光标放在音符、休止符或和弦上")
+            set_widget_state(self.validation_label, "warning")
+            self.editor.setFocus()
+            return
+
+        cursor.beginEditBlock()
+        cursor.select(QTextCursor.SelectionType.Document)
+        cursor.insertText(result.text)
+        cursor.endEditBlock()
+        cursor.setPosition(result.cursor_position)
+        self.editor.setTextCursor(cursor)
+        self.editor.setFocus()
+
+    def _set_custom_duration(self) -> None:
+        """询问自定义拍数并应用到光标所在或选中的音符。"""
+
+        duration, accepted = QInputDialog.getDouble(
+            self,
+            "自定义总时值",
+            "总拍数：",
+            1.0,
+            0.001,
+            9999.0,
+            3,
+        )
+        if not accepted:
+            return
+        duration_text = f"{duration:.3f}".rstrip("0").rstrip(".")
+        self._set_total_duration(duration_text)
 
     def save(self) -> None:
         """经用户确认后校验并保存曲谱，成功后关闭编辑窗口。"""
@@ -163,10 +242,10 @@ class ScoreEditorWindow(QMainWindow):
             self.validation_label.setText(
                 f"语法正确 · {len(score.notes)} 个音符 · {float(score.total_beats):g} 拍"
             )
-            self.validation_label.setStyleSheet("color: #777B81;")
+            set_widget_state(self.validation_label, "normal")
         except ScoreParseError as exc:
             self.validation_label.setText(str(exc))
-            self.validation_label.setStyleSheet("color: #D86A6A;")
+            set_widget_state(self.validation_label, "error")
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """

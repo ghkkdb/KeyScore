@@ -9,24 +9,6 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QProgressBar, QVBoxLayout, QWidget
 
 
-_OVERLAY_STYLE = """
-QFrame#card {
-    background: rgba(16, 17, 18, 232);
-    border: none;
-    border-radius: 8px;
-}
-QLabel { color: #ECEDEE; background: transparent; }
-QLabel#muted { color: #85898F; }
-QProgressBar {
-    background: #343638;
-    border: none;
-    border-radius: 1px;
-    height: 2px;
-}
-QProgressBar::chunk { background: #ECEDEE; border-radius: 1px; }
-"""
-
-
 class _BaseOverlay(QWidget):
     """提供透明、置顶、不激活的悬浮窗口基类。"""
 
@@ -43,7 +25,6 @@ class _BaseOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.setStyleSheet(_OVERLAY_STYLE)
 
     def _move_top_center(self, top: int) -> None:
         """
@@ -69,13 +50,13 @@ class CountdownOverlay(_BaseOverlay):
         super().__init__()
         self.setFixedSize(360, 220)
         outer = QVBoxLayout(self)
-        card = QFrame(objectName="card")
+        card = QFrame(objectName="overlayCard")
         layout = QVBoxLayout(card)
         layout.setContentsMargins(28, 24, 28, 20)
         layout.setSpacing(8)
         self.number_label = QLabel("3")
         self.number_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.number_label.setStyleSheet("font-size: 72px; font-weight: 400; color: #ECEDEE;")
+        self.number_label.setStyleSheet("font-size: 72px; font-weight: 400;")
         self.message_label = QLabel("即将开始演奏")
         self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.message_label.setStyleSheet("font-size: 17px; font-weight: 400;")
@@ -175,7 +156,7 @@ class PlaybackOverlay(_BaseOverlay):
         self.setFixedSize(500, 108)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        card = QFrame(objectName="card")
+        card = QFrame(objectName="overlayCard")
         layout = QVBoxLayout(card)
         layout.setContentsMargins(20, 14, 20, 14)
         layout.setSpacing(8)

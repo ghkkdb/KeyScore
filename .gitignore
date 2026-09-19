@@ -3,6 +3,8 @@ __pycache__/
 .venv/
 .venv64/
 .artifacts/
+data/app_settings.json
+data/profile.json
 data/profile_state.json
 data/**/*.tmp
 build/

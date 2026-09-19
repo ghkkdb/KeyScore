@@ -101,6 +101,59 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(note_events[1].timestamp_ms, 1990.0)
         self.assertEqual(note_events[2].timestamp_ms, 2000.0)
 
+    def test_hold_mode_connects_different_legato_notes_without_gap(self) -> None:
+        """持续按住模式下，异键连音应在下一音起点才释放旧音。"""
+
+        profile = default_profile()
+        profile.note_output_mode = NoteOutputMode.HOLD
+        profile.key_gap_ms = 10
+        plan = compile_score(parse_score("@bpm 120\n(1 2)"), profile)
+        note_events = [event for event in plan.events if event.note is not None]
+        self.assertEqual(note_events[1].timestamp_ms, 500.0)
+        self.assertEqual(note_events[2].timestamp_ms, 500.0)
+        self.assertEqual(note_events[1].action, ActionType.RELEASE)
+        self.assertEqual(note_events[2].action, ActionType.PRESS)
+
+    def test_tap_mode_does_not_extend_legato_notes(self) -> None:
+        """短按触发模式不应因连音标记改变固定按键时长。"""
+
+        profile = default_profile()
+        profile.note_output_mode = NoteOutputMode.TAP
+        plan = compile_score(parse_score("@bpm 120\n(1 2)"), profile)
+        note_events = [event for event in plan.events if event.note is not None]
+        self.assertEqual(note_events[1].timestamp_ms, 50.0)
+
+    def test_legato_same_binding_preserves_release_gap(self) -> None:
+        """连续使用同一物理键时应保留释放间隔以避免吞键。"""
+
+        profile = default_profile()
+        profile.note_output_mode = NoteOutputMode.HOLD
+        profile.key_gap_ms = 10
+        plan = compile_score(parse_score("@bpm 120\n(1 1)"), profile)
+        note_events = [event for event in plan.events if event.note is not None]
+        self.assertEqual(note_events[1].timestamp_ms, 490.0)
+        self.assertEqual(note_events[2].timestamp_ms, 500.0)
+
+    def test_legato_waits_for_next_modifier_transition(self) -> None:
+        """跨音区连音应保持旧音至新音完成修饰键切换。"""
+
+        profile = default_profile()
+        profile.note_output_mode = NoteOutputMode.HOLD
+        plan = compile_score(parse_score("@bpm 120\n(1 H2)"), profile)
+        note_events = [event for event in plan.events if event.note is not None]
+        first_release = next(
+            event
+            for event in note_events
+            if event.note.degree == 1 and event.action is ActionType.RELEASE
+        )
+        second_press = next(
+            event
+            for event in note_events
+            if event.note.degree == 2 and event.action is ActionType.PRESS
+        )
+        self.assertEqual(first_release.timestamp_ms, second_press.timestamp_ms)
+        self.assertEqual(second_press.timestamp_ms, 535.0)
+
     def test_direct_note_mapping_allows_cross_octave_chord(self) -> None:
         """直接映射方案应能表达不同音区构成的同一和弦。"""
 

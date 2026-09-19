@@ -70,6 +70,7 @@ class NoteEvent:
     degree: int
     octave: Octave
     is_semitone: bool = False
+    legato_to_next: bool = False
 
 
 @dataclass(frozen=True)

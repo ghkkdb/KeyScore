@@ -7,6 +7,7 @@ from fractions import Fraction
 
 from .models import (
     ActionType,
+    Binding,
     GameProfile,
     MappingMode,
     NoteEvent,
@@ -44,6 +45,8 @@ def _append_note_events(
     note_start_ms: float,
     note_duration_ms: float,
     profile: GameProfile,
+    legato_release_ms: float | None = None,
+    next_bindings: set[Binding] | None = None,
 ) -> float:
     """
     为单个音符添加按下和释放事件。
@@ -54,6 +57,8 @@ def _append_note_events(
         note_start_ms (float): 音符的实际按键起点。
         note_duration_ms (float): 从实际按下到下一拍点的可用时间。
         profile (GameProfile): 游戏配置。
+        legato_release_ms (float | None): 连音下一音符的实际按键起点。
+        next_bindings (set[Binding] | None): 下一组音符使用的物理按键。
 
     Returns:
         float: 音符释放事件的绝对毫秒时间戳。
@@ -71,11 +76,18 @@ def _append_note_events(
     if binding is None:
         raise PlanCompileError(f"音符 {note.octave.value} {note.degree} 没有配置按键")
     available_hold_ms = max(1.0, note_duration_ms - float(profile.key_gap_ms))
-    hold_ms = (
-        available_hold_ms
-        if profile.note_output_mode is NoteOutputMode.HOLD
-        else min(float(profile.key_hold_ms), available_hold_ms)
+    can_connect_legato = (
+        profile.note_output_mode is NoteOutputMode.HOLD
+        and note.legato_to_next
+        and legato_release_ms is not None
+        and binding not in (next_bindings or set())
     )
+    if can_connect_legato:
+        hold_ms = max(1.0, legato_release_ms - note_start_ms)
+    elif profile.note_output_mode is NoteOutputMode.HOLD:
+        hold_ms = available_hold_ms
+    else:
+        hold_ms = min(float(profile.key_hold_ms), available_hold_ms)
     output.append(TimedInputEvent(note_start_ms, ActionType.PRESS, binding, note))
     release_ms = note_start_ms + hold_ms
     output.append(TimedInputEvent(release_ms, ActionType.RELEASE, binding, note))
@@ -101,7 +113,9 @@ def compile_score(score: Score, profile: GameProfile) -> PlaybackPlan:
     for note in score.notes:
         groups[note.start_beat].append(note)
 
-    output: list[TimedInputEvent] = []
+    prepared_groups: list[
+        tuple[Fraction, list[NoteEvent], float, float, list[Binding]]
+    ] = []
     for start_beat in sorted(groups):
         notes = groups[start_beat]
         start_ms = _milliseconds(start_beat, score.bpm)
@@ -125,9 +139,36 @@ def compile_score(score: Score, profile: GameProfile) -> PlaybackPlan:
             if next(iter(semitone_states)):
                 modifiers.append(profile.semitone_binding)
 
+        note_start_ms = start_ms + transition_ms if modifiers else start_ms
+        for note in notes:
+            if profile.mapping_mode is MappingMode.DEGREE_MODIFIER:
+                binding = profile.note_bindings.get(note.degree)
+            else:
+                binding = profile.direct_note_bindings.get(note_binding_key(note))
+            if binding is None:
+                raise PlanCompileError(f"音符 {note.octave.value} {note.degree} 没有配置按键")
+        prepared_groups.append((start_beat, notes, start_ms, note_start_ms, modifiers))
+
+    output: list[TimedInputEvent] = []
+    for group_index, (start_beat, notes, start_ms, note_start_ms, modifiers) in enumerate(
+        prepared_groups
+    ):
+        next_note_start_ms: float | None = None
+        next_bindings: set[Binding] = set()
+        if group_index + 1 < len(prepared_groups):
+            _, next_notes, _, next_note_start_ms, _ = prepared_groups[group_index + 1]
+            for next_note in next_notes:
+                if profile.mapping_mode is MappingMode.DEGREE_MODIFIER:
+                    next_binding = profile.note_bindings.get(next_note.degree)
+                else:
+                    next_binding = profile.direct_note_bindings.get(
+                        note_binding_key(next_note)
+                    )
+                if next_binding is not None:
+                    next_bindings.add(next_binding)
+
         for modifier in modifiers:
             output.append(TimedInputEvent(start_ms, ActionType.PRESS, modifier))
-        note_start_ms = start_ms + transition_ms if modifiers else start_ms
         modifier_release_ms = note_start_ms
         for note in notes:
             duration_ms = _milliseconds(note.duration_beats, score.bpm)
@@ -138,8 +179,19 @@ def compile_score(score: Score, profile: GameProfile) -> PlaybackPlan:
                 note_start_ms,
                 available_ms,
                 profile,
+                next_note_start_ms,
+                next_bindings,
             )
             modifier_release_ms = max(modifier_release_ms, release_ms)
+        if (
+            profile.note_output_mode is NoteOutputMode.HOLD
+            and any(note.legato_to_next for note in notes)
+            and group_index + 1 < len(prepared_groups)
+        ):
+            modifier_release_ms = min(
+                modifier_release_ms,
+                prepared_groups[group_index + 1][2],
+            )
         for modifier in modifiers:
             output.append(TimedInputEvent(modifier_release_ms, ActionType.RELEASE, modifier))
 

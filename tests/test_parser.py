@@ -106,6 +106,44 @@ class ScoreParserTests(unittest.TestCase):
         with self.assertRaisesRegex(ScoreParseError, "增时线前"):
             parse_score("1\n---\n- 2")
 
+    def test_legato_group_marks_connections_without_changing_timing(self) -> None:
+        """连音组只应标记组内连接，不改变音符拍位和时值。"""
+
+        score = parse_score("(1 2 | H3:0.5) 4")
+        self.assertEqual(
+            [note.legato_to_next for note in score.notes],
+            [True, True, False, False],
+        )
+        self.assertEqual(
+            [note.start_beat for note in score.notes],
+            [Fraction(0), Fraction(1), Fraction(2), Fraction(5, 2)],
+        )
+        self.assertEqual(score.total_beats, Fraction(7, 2))
+
+    def test_legato_group_supports_chords_and_line_breaks(self) -> None:
+        """连音组应允许和弦、小节线与普通换行。"""
+
+        score = parse_score("([1 3 5] |\n2) 4")
+        self.assertTrue(all(note.legato_to_next for note in score.notes[:3]))
+        self.assertFalse(score.notes[3].legato_to_next)
+        self.assertFalse(score.notes[4].legato_to_next)
+
+    def test_legato_group_rejects_invalid_structure(self) -> None:
+        """连音组应拒绝休止符、嵌套、单音和不匹配括号。"""
+
+        invalid_scores = (
+            "(1 0 2)",
+            "(1 (2 3))",
+            "(1)",
+            "1 (- 2 3)",
+            "1 2)",
+            "(1 2",
+            "(1\n---\n2)",
+        )
+        for source in invalid_scores:
+            with self.subTest(source=source), self.assertRaises(ScoreParseError):
+                parse_score(source)
+
 
 if __name__ == "__main__":
     unittest.main()

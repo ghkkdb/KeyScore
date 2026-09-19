@@ -9,7 +9,9 @@ from fractions import Fraction
 from .models import NoteEvent, Octave, Score
 
 
-_TOKEN_PATTERN = re.compile(r"\[[^\]]+\](?::\d+(?:\.\d+)?)?|[^\s|]+|\|")
+_TOKEN_PATTERN = re.compile(
+    r"\[[^\]]+\](?::\d+(?:\.\d+)?)?|\(|\)|[^\s|()]+|\|"
+)
 _NOTE_PATTERN = re.compile(
     r"^(?P<sharp>#?)(?P<octave>[LH]?)(?P<degree>[0-7])(?::(?P<duration>\d+(?:\.\d+)?))?$"
 )
@@ -194,12 +196,35 @@ def parse_score(text: str) -> Score:
     position = Fraction(0)
     notes: list[NoteEvent] = []
     extendable_note_indices: list[int] | None = None
+    in_legato = False
+    legato_open_line = 0
+    legato_unit_count = 0
+    legato_previous_indices: list[int] | None = None
     for line_number, line in score_lines:
         if line == "---":
+            if in_legato:
+                raise ScoreParseError("连音组内不能包含段落停顿", line_number, line)
             position += section_gap
             extendable_note_indices = None
             continue
         for token in _TOKEN_PATTERN.findall(line):
+            if token == "(":
+                if in_legato:
+                    raise ScoreParseError("连音组不能嵌套", line_number, token)
+                in_legato = True
+                legato_open_line = line_number
+                legato_unit_count = 0
+                legato_previous_indices = None
+                extendable_note_indices = None
+                continue
+            if token == ")":
+                if not in_legato:
+                    raise ScoreParseError("缺少连音组开始符号 `(`", line_number, token)
+                if legato_unit_count < 2:
+                    raise ScoreParseError("连音组至少需要两个音符或和弦", line_number, token)
+                in_legato = False
+                legato_previous_indices = None
+                continue
             if token == "|":
                 continue
             if token == "-":
@@ -213,6 +238,11 @@ def parse_score(text: str) -> Score:
                 position += 1
                 continue
             parsed = _parse_token(token, line_number)
+            if in_legato and not parsed.notes:
+                raise ScoreParseError("连音组内不能包含休止符", line_number, token)
+            if in_legato and legato_previous_indices is not None:
+                for note_index in legato_previous_indices:
+                    notes[note_index] = replace(notes[note_index], legato_to_next=True)
             first_note_index = len(notes)
             for degree, octave, is_semitone in parsed.notes:
                 notes.append(
@@ -225,7 +255,13 @@ def parse_score(text: str) -> Score:
                     )
                 )
             extendable_note_indices = list(range(first_note_index, len(notes)))
+            if in_legato:
+                legato_previous_indices = extendable_note_indices
+                legato_unit_count += 1
             position += parsed.duration
+
+    if in_legato:
+        raise ScoreParseError("连音组缺少结束符号 `)`", legato_open_line, "(")
 
     if position == 0:
         raise ScoreParseError("曲谱中没有可播放的内容", 1, "")

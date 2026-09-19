@@ -1,22 +1,17 @@
-"""键谱的极简歌单与播放主窗口。"""
+"""键谱的三页导航、曲谱与播放主窗口。"""
 
 from __future__ import annotations
 
-from fractions import Fraction
+from copy import deepcopy
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
-    QDialog,
-    QDialogButtonBox,
     QComboBox,
     QFileDialog,
-    QFormLayout,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
-    QLayout,
     QListWidget,
     QListWidgetItem,
     QLineEdit,
@@ -25,14 +20,14 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
-    QSpinBox,
     QSplitter,
+    QStackedWidget,
     QStatusBar,
     QVBoxLayout,
     QWidget,
 )
 
-from .binding_capture import capture_binding
+from .app_settings import AppSettings, ThemeId, save_app_settings
 from .compiler import PlanCompileError, compile_score
 from .editor_window import ScoreEditorWindow
 from .foreground import foreground_window, is_foreground
@@ -41,18 +36,15 @@ from .input_backend import WindowsSendInputBackend
 from .library import ScoreEntry, ScoreLibrary, default_data_directory
 from .models import (
     ActionType,
-    Binding,
-    MappingMode,
-    NoteEvent,
-    NoteOutputMode,
+    GameProfile,
     Octave,
     PlaybackPlan,
     TimedInputEvent,
-    note_binding_key,
 )
 from .overlay import CountdownOverlay, PlaybackOverlay
 from .parser import ScoreParseError, parse_score
 from .playback import PlaybackState, TimelinePlayer
+from .profile_page import ProfileMappingPage
 from .profile_store import (
     import_profile,
     list_profile_paths,
@@ -63,51 +55,7 @@ from .profile_store import (
     save_profile,
     save_profile_with_name,
 )
-
-
-_STYLE = """
-QMainWindow, QWidget { background: #101112; color: #ECEDEE; }
-QMenuBar { background: #101112; color: #8E9298; border: none; }
-QMenuBar::item:selected, QMenu::item:selected { background: #202224; color: #FFFFFF; }
-QMenu { background: #171819; color: #ECEDEE; border: 1px solid #292B2E; }
-QLabel#muted { color: #777B81; }
-QListWidget {
-    background: #101112; color: #AEB1B6; border: none; outline: none;
-    padding: 4px 0; font-size: 14px;
-}
-QListWidget::item { padding: 9px 10px; border-radius: 4px; }
-QListWidget::item:selected { background: #202224; color: #FFFFFF; }
-QListWidget::item:hover { background: #181A1C; }
-QPlainTextEdit {
-    background: #101112; color: #C7C9CD; border: none;
-    padding: 16px 0; selection-background-color: #3B3E43;
-    font-family: "Cascadia Mono", "Consolas"; font-size: 15px;
-}
-QComboBox, QLineEdit, QSpinBox {
-    background: #171819; color: #ECEDEE; border: 1px solid #303236;
-    border-radius: 5px; padding: 7px 9px;
-}
-QComboBox QLineEdit {
-    background: transparent; color: #ECEDEE; border: none; padding: 0;
-}
-QComboBox QAbstractItemView {
-    background: #171819; color: #ECEDEE; border: 1px solid #303236;
-    selection-background-color: #292C2F;
-}
-QPushButton {
-    background: transparent; color: #B8BBC0; border: none;
-    border-radius: 5px; padding: 8px 12px;
-}
-QPushButton:hover { background: #1B1D1F; color: #FFFFFF; }
-QPushButton#primary { background: #ECEDEE; color: #101112; font-weight: 600; }
-QPushButton#primary:hover { background: #FFFFFF; }
-QPushButton#binding { background: #171819; border: 1px solid #292B2E; text-align: left; }
-QProgressBar { background: #242628; border: none; border-radius: 1px; height: 2px; }
-QProgressBar::chunk { background: #ECEDEE; border-radius: 1px; }
-QStatusBar { color: #666A70; border-top: 1px solid #202224; }
-QSplitter::handle { background: #202224; width: 1px; }
-QDialog { background: #101112; }
-"""
+from .theme import THEME_LABELS, ThemeManager
 
 
 class _UiSignals(QObject):
@@ -123,14 +71,21 @@ class _UiSignals(QObject):
 class MainWindow(QMainWindow):
     """提供曲谱歌单、播放预览、按键映射和前台安全保护。"""
 
-    def __init__(self) -> None:
-        """初始化曲谱库、持久化配置、播放器和界面。"""
+    def __init__(self, theme_manager: ThemeManager, app_settings_path: Path) -> None:
+        """
+        初始化曲谱库、持久化配置、播放器和界面。
+
+        Args:
+            theme_manager (ThemeManager): 全局主题管理器。
+            app_settings_path (Path): 应用级设置文件路径。
+        """
 
         super().__init__()
         self.setWindowTitle("KeyScore 键谱")
-        self.resize(980, 680)
-        self.setMinimumSize(760, 520)
-        self.setStyleSheet(_STYLE)
+        self.resize(1120, 720)
+        self.setMinimumSize(860, 580)
+        self.theme_manager = theme_manager
+        self.app_settings_path = app_settings_path
 
         self.data_directory = default_data_directory()
         self.library = ScoreLibrary(self.data_directory)
@@ -181,50 +136,128 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._start_hotkeys)
 
     def _build_ui(self) -> None:
-        """创建左侧歌单和右侧播放预览的极简布局。"""
+        """创建固定顶部栏、左侧导航和三页工作区。"""
 
-        central = QWidget()
+        central = QWidget(objectName="centralPanel")
         root = QVBoxLayout(central)
-        root.setContentsMargins(28, 22, 28, 16)
+        root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
+        root.addWidget(self._build_header())
 
-        header = QHBoxLayout()
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        sidebar = QWidget(objectName="sidebar")
+        sidebar.setFixedWidth(168)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(12, 18, 12, 14)
+        sidebar_layout.setSpacing(8)
+        self.navigation_buttons: list[QPushButton] = []
+        for index, text in enumerate(("曲谱", "按键映射", "设置")):
+            button = QPushButton(text, objectName="navigation")
+            button.setProperty("active", index == 0)
+            button.clicked.connect(lambda _checked=False, page=index: self._switch_page(page))
+            sidebar_layout.addWidget(button)
+            self.navigation_buttons.append(button)
+        sidebar_layout.addStretch()
+        version = QLabel("KeyScore v1.0\n用键盘，奏响你的音乐", objectName="muted")
+        sidebar_layout.addWidget(version)
+
+        self.pages = QStackedWidget()
+        self.pages.addWidget(self._build_score_page())
+        self.profile_page = ProfileMappingPage()
+        self.profile_page.save_requested.connect(self._save_profile_changes)
+        self.profile_page.new_requested.connect(self._new_profile)
+        self.profile_page.import_requested.connect(self._import_profile)
+        self.pages.addWidget(self.profile_page)
+        self.pages.addWidget(self._build_settings_page())
+        body.addWidget(sidebar)
+        body.addWidget(self.pages, 1)
+        root.addLayout(body, 1)
+        self.setCentralWidget(central)
+        self.setStatusBar(QStatusBar())
+        self.statusBar().showMessage("就绪：选择曲谱后在游戏前台按 F9")
+        self._refresh_profile_combo()
+
+    def _build_header(self) -> QWidget:
+        """
+        创建应用级播放控制和 Profile 选择栏。
+
+        Returns:
+            QWidget: 顶部控制栏。
+        """
+
+        header_widget = QWidget(objectName="topBar")
+        header = QHBoxLayout(header_widget)
+        header.setContentsMargins(20, 12, 20, 12)
+        header.setSpacing(8)
         brand = QLabel("KeyScore")
-        brand.setStyleSheet("font-size: 19px; font-weight: 600;")
+        brand.setObjectName("brand")
+        previous_button = QPushButton("上一首")
+        previous_button.clicked.connect(self._previous_score)
+        self.header_play_button = QPushButton("播放", objectName="primary")
+        self.header_play_button.clicked.connect(self.toggle_playback)
+        header_stop_button = QPushButton("停止")
+        header_stop_button.clicked.connect(self.emergency_stop)
+        next_button = QPushButton("下一首")
+        next_button.clicked.connect(self._next_score)
         shortcut_hint = QLabel("F9  播放 / 暂停    F10  停止")
         shortcut_hint.setObjectName("muted")
         self.profile_combo = QComboBox()
-        self.profile_combo.setMinimumWidth(170)
+        self.profile_combo.setMinimumWidth(190)
         self.profile_combo.setEditable(True)
         profile_line_edit = self.profile_combo.lineEdit()
         if profile_line_edit is not None:
             profile_line_edit.setReadOnly(True)
             profile_line_edit.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.profile_combo.setPlaceholderText("选择配置方案")
-        self._refresh_profile_combo()
         self.profile_combo.currentIndexChanged.connect(self._select_profile)
-        settings_button = QPushButton("设置")
-        settings_button.clicked.connect(self._show_settings)
         header.addWidget(brand)
         header.addStretch()
+        header.addWidget(previous_button)
+        header.addWidget(self.header_play_button)
+        header.addWidget(header_stop_button)
+        header.addWidget(next_button)
+        header.addSpacing(10)
         header.addWidget(shortcut_hint)
         header.addSpacing(12)
         header.addWidget(self.profile_combo)
-        header.addWidget(settings_button)
-        root.addLayout(header)
-        root.addSpacing(26)
+        return header_widget
+
+    def _build_score_page(self) -> QWidget:
+        """
+        创建曲谱管理、预览和播放状态合并页面。
+
+        Returns:
+            QWidget: 曲谱页面。
+        """
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 20, 24, 18)
+        layout.setSpacing(14)
+        heading_row = QHBoxLayout()
+        heading_box = QVBoxLayout()
+        heading_box.addWidget(QLabel("曲谱", objectName="displayTitle"))
+        heading_box.addWidget(QLabel("管理、预览、编辑和播放本地曲谱", objectName="muted"))
+        import_button = QPushButton("导入")
+        import_button.clicked.connect(self._import_score)
+        new_button = QPushButton("新建曲谱", objectName="primary")
+        new_button.clicked.connect(self._new_score)
+        heading_row.addLayout(heading_box)
+        heading_row.addStretch()
+        heading_row.addWidget(import_button)
+        heading_row.addWidget(new_button)
+        layout.addLayout(heading_row)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._build_playlist())
         splitter.addWidget(self._build_preview())
-        splitter.setSizes([230, 690])
+        splitter.setSizes([250, 650])
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        root.addWidget(splitter, 1)
-        root.addWidget(self._build_controls())
-        self.setCentralWidget(central)
-        self.setStatusBar(QStatusBar())
-        self.statusBar().showMessage("就绪：选择曲谱后在游戏前台按 F9")
+        layout.addWidget(splitter, 1)
+        return page
 
     def _build_playlist(self) -> QWidget:
         """
@@ -234,29 +267,23 @@ class MainWindow(QMainWindow):
             QWidget: 歌单面板。
         """
 
-        panel = QWidget()
+        panel = QWidget(objectName="pageCard")
         panel.setMinimumWidth(190)
-        panel.setMaximumWidth(300)
+        panel.setMaximumWidth(330)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 20, 0)
-        heading = QLabel("曲谱")
-        heading.setStyleSheet("font-size: 13px; color: #8E9298;")
+        layout.setContentsMargins(14, 14, 14, 12)
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("搜索曲谱…")
+        self.search_edit.textChanged.connect(self._filter_playlist)
         self.playlist = QListWidget()
         self.playlist.currentItemChanged.connect(self._on_playlist_selection)
         self.playlist.itemDoubleClicked.connect(lambda _item: self._edit_current())
         actions = QHBoxLayout()
-        new_button = QPushButton("新建")
-        new_button.clicked.connect(self._new_score)
-        import_button = QPushButton("导入")
-        import_button.clicked.connect(self._import_score)
         delete_button = QPushButton("删除")
         delete_button.clicked.connect(self._delete_current_score)
-        actions.addWidget(new_button)
-        actions.addWidget(import_button)
         actions.addWidget(delete_button)
         actions.addStretch()
-        layout.addWidget(heading)
-        layout.addSpacing(8)
+        layout.addWidget(self.search_edit)
         layout.addWidget(self.playlist, 1)
         layout.addLayout(actions)
         return panel
@@ -269,12 +296,12 @@ class MainWindow(QMainWindow):
             QWidget: 曲谱预览面板。
         """
 
-        panel = QWidget()
+        panel = QWidget(objectName="pageCard")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(30, 0, 0, 0)
+        layout.setContentsMargins(18, 16, 18, 14)
         title_row = QHBoxLayout()
         self.score_title = QLabel("未选择曲谱")
-        self.score_title.setStyleSheet("font-size: 24px; font-weight: 500;")
+        self.score_title.setObjectName("displayTitle")
         self.edit_button = QPushButton("编辑")
         self.edit_button.clicked.connect(self._edit_current)
         self.edit_button.setEnabled(False)
@@ -289,6 +316,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(title_row)
         layout.addWidget(self.score_meta)
         layout.addWidget(self.preview, 1)
+        layout.addWidget(self._build_controls())
         return panel
 
     def _build_controls(self) -> QWidget:
@@ -301,7 +329,7 @@ class MainWindow(QMainWindow):
 
         panel = QWidget()
         layout = QHBoxLayout(panel)
-        layout.setContentsMargins(250, 12, 0, 0)
+        layout.setContentsMargins(0, 10, 0, 0)
         info = QVBoxLayout()
         self.now_playing = QLabel("尚未播放")
         self.progress = QProgressBar()
@@ -311,6 +339,7 @@ class MainWindow(QMainWindow):
         info.addWidget(self.progress)
         self.play_button = QPushButton("播放", objectName="primary")
         self.play_button.clicked.connect(self.toggle_playback)
+        self.play_buttons = [self.header_play_button, self.play_button]
         self.stop_button = QPushButton("停止")
         self.stop_button.clicked.connect(self.emergency_stop)
         layout.addLayout(info, 1)
@@ -319,8 +348,53 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.stop_button)
         return panel
 
+    def _build_settings_page(self) -> QWidget:
+        """
+        创建只包含应用级选项的设置页面。
+
+        Returns:
+            QWidget: 全局设置页面。
+        """
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 20, 24, 18)
+        layout.setSpacing(14)
+        layout.addWidget(QLabel("设置", objectName="displayTitle"))
+        layout.addWidget(QLabel("管理不随按键配置方案变化的全局选项", objectName="muted"))
+        card = QWidget(objectName="pageCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(20, 18, 20, 18)
+        card_layout.setSpacing(12)
+        card_layout.addWidget(QLabel("外观", objectName="sectionLabel"))
+        theme_row = QHBoxLayout()
+        theme_description = QVBoxLayout()
+        theme_description.addWidget(QLabel("界面风格"))
+        theme_description.addWidget(
+            QLabel("应用到主窗口、编辑器、对话框和播放悬浮层", objectName="muted")
+        )
+        self.theme_combo = QComboBox()
+        self.theme_combo.setMinimumWidth(230)
+        for theme, label in THEME_LABELS.items():
+            self.theme_combo.addItem(label, theme.value)
+        self.theme_combo.setCurrentIndex(
+            max(0, self.theme_combo.findData(self.theme_manager.current.value))
+        )
+        self.theme_combo.currentIndexChanged.connect(self._apply_selected_theme)
+        theme_row.addLayout(theme_description, 1)
+        theme_row.addWidget(self.theme_combo)
+        card_layout.addLayout(theme_row)
+        card_layout.addSpacing(12)
+        card_layout.addWidget(QLabel("数据", objectName="sectionLabel"))
+        data_label = QLabel(f"应用数据目录\n{self.data_directory}", objectName="muted")
+        data_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        card_layout.addWidget(data_label)
+        card_layout.addStretch()
+        layout.addWidget(card, 1)
+        return page
+
     def _build_menu(self) -> None:
-        """创建新建、导入、编辑和设置菜单。"""
+        """创建曲谱与配置方案的文件菜单。"""
 
         menu = self.menuBar().addMenu("文件")
         new_action = QAction("新建曲谱", self)
@@ -373,16 +447,43 @@ class MainWindow(QMainWindow):
             self._select_profile(self.profile_combo.currentIndex(), show_status=False)
 
     def _select_profile(self, index: int, show_status: bool = True) -> None:
-        """切换当前用于编译和播放的独立配置方案。"""
+        """
+        切换当前用于编译和播放的独立配置方案。
+
+        Args:
+            index (int): 顶部 Profile 下拉框索引。
+            show_status (bool): 是否显示切换状态并处理未保存提示。
+        """
 
         if index < 0:
             return
         path_text = self.profile_combo.itemData(index)
         if not isinstance(path_text, str):
             return
+        selected_path = Path(path_text)
+        current_path = getattr(self, "profile_path", None)
+        if (
+            show_status
+            and current_path is not None
+            and selected_path.resolve() != current_path.resolve()
+            and self.profile_page.has_unsaved_changes
+        ):
+            result = QMessageBox.question(
+                self,
+                "放弃方案修改？",
+                "当前按键映射存在未保存修改，是否放弃并切换配置方案？",
+                QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if result != QMessageBox.StandardButton.Discard:
+                previous_index = self.profile_combo.findData(str(current_path))
+                self.profile_combo.blockSignals(True)
+                self.profile_combo.setCurrentIndex(previous_index)
+                self.profile_combo.blockSignals(False)
+                return
         if show_status:
             self._discard_playback_plan()
-        self.profile_path = Path(path_text)
+        self.profile_path = selected_path
         self.profile = load_profile(self.profile_path)
         try:
             save_active_profile(self.profile_path, self.profile_state_path)
@@ -392,6 +493,7 @@ class MainWindow(QMainWindow):
         self.profile_combo.setToolTip(
             f"当前配置：{self.profile.name}\n映射模式：{self.profile.mapping_mode.value}"
         )
+        self.profile_page.load_profile(self.profile)
         if show_status:
             self.statusBar().showMessage(f"已切换配置方案：{self.profile.name}")
 
@@ -412,6 +514,8 @@ class MainWindow(QMainWindow):
 
         from PySide6.QtWidgets import QInputDialog
 
+        if not self._confirm_discard_profile_changes():
+            return
         name, accepted = QInputDialog.getText(self, "新建配置方案", "方案名称：")
         if not accepted or not name.strip():
             return
@@ -420,19 +524,23 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "无法新建", "同名配置方案已存在")
             return
         self._discard_playback_plan()
-        self.profile.name = name.strip()
+        new_profile = deepcopy(self.profile)
+        new_profile.name = name.strip()
         try:
-            save_profile(self.profile, path)
+            save_profile(new_profile, path)
         except OSError as exc:
             QMessageBox.warning(self, "新建失败", str(exc))
             return
         self.profile_path = path
+        self.profile = new_profile
         self._refresh_profile_combo()
         self.statusBar().showMessage(f"已新建并切换配置方案：{self.profile.name}")
 
     def _import_profile(self) -> None:
         """导入外部 Profile，并立即显示和切换到该配置方案。"""
 
+        if not self._confirm_discard_profile_changes():
+            return
         filename, _ = QFileDialog.getOpenFileName(
             self,
             "导入配置方案",
@@ -450,6 +558,126 @@ class MainWindow(QMainWindow):
         self.profile_path = path
         self._refresh_profile_combo()
         self.statusBar().showMessage(f"已导入并切换配置方案：{self.profile.name}")
+
+    def _confirm_discard_profile_changes(self) -> bool:
+        """
+        在离开当前 Profile 草稿前确认是否放弃修改。
+
+        Returns:
+            bool: 没有未保存修改或用户确认放弃时为 `True`。
+        """
+
+        if not self.profile_page.has_unsaved_changes:
+            return True
+        result = QMessageBox.question(
+            self,
+            "放弃方案修改？",
+            "当前按键映射存在未保存修改，是否放弃这些修改？",
+            QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        return result == QMessageBox.StandardButton.Discard
+
+    def _switch_page(self, index: int) -> None:
+        """
+        切换主工作区页面并更新侧栏选中态。
+
+        Args:
+            index (int): 页面索引，依次为曲谱、按键映射和设置。
+        """
+
+        if not 0 <= index < self.pages.count():
+            return
+        self.pages.setCurrentIndex(index)
+        for button_index, button in enumerate(self.navigation_buttons):
+            button.setProperty("active", button_index == index)
+            style = button.style()
+            style.unpolish(button)
+            style.polish(button)
+            button.update()
+
+    def _previous_score(self) -> None:
+        """选择歌单中的上一首曲谱。"""
+
+        count = self.playlist.count()
+        if count == 0:
+            return
+        current = self.playlist.currentRow()
+        self.playlist.setCurrentRow(max(0, current - 1))
+        self._switch_page(0)
+
+    def _next_score(self) -> None:
+        """选择歌单中的下一首曲谱。"""
+
+        count = self.playlist.count()
+        if count == 0:
+            return
+        current = self.playlist.currentRow()
+        self.playlist.setCurrentRow(min(count - 1, current + 1))
+        self._switch_page(0)
+
+    def _filter_playlist(self, query: str) -> None:
+        """
+        按曲名过滤歌单条目。
+
+        Args:
+            query (str): 搜索框内容。
+        """
+
+        normalized_query = query.strip().casefold()
+        for row in range(self.playlist.count()):
+            item = self.playlist.item(row)
+            item.setHidden(normalized_query not in item.text().casefold())
+
+    def _apply_selected_theme(self, _index: int) -> None:
+        """
+        即时应用并持久化设置页选择的全局主题。
+
+        Args:
+            _index (int): 主题下拉框索引。
+        """
+
+        try:
+            theme = ThemeId(str(self.theme_combo.currentData()))
+        except ValueError:
+            theme = ThemeId.FLUENT
+        self.theme_manager.apply(theme)
+        try:
+            save_app_settings(AppSettings(theme=theme), self.app_settings_path)
+        except OSError as exc:
+            QMessageBox.warning(self, "主题保存失败", f"主题已临时生效，但无法保存：{exc}")
+            return
+        self.statusBar().showMessage(f"界面风格已切换为：{THEME_LABELS[theme]}")
+
+    def _save_profile_changes(self, profile: object, name: str) -> None:
+        """
+        保存按键映射页面提交的 Profile 草稿。
+
+        Args:
+            profile (object): 页面提交的 Profile 草稿。
+            name (str): 用户输入的方案名称。
+        """
+
+        if not isinstance(profile, GameProfile):
+            QMessageBox.warning(self, "保存失败", "配置方案数据无效")
+            return
+        self._discard_playback_plan()
+        try:
+            saved_path = save_profile_with_name(
+                profile,
+                self.profile_path,
+                self.profiles_directory,
+                name,
+            )
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "保存失败", str(exc))
+            return
+        self.profile = profile
+        self.profile.name = name.strip()
+        self.profile_path = saved_path
+        self._refresh_profile_combo()
+        self.profile_page.mark_saved(self.profile)
+        self.statusBar().showMessage(f"当前配置已保存并生效：{self.profile.name}")
 
     def _start_hotkeys(self) -> None:
         """启动全局 F9/F10 监听器。"""
@@ -476,6 +704,7 @@ class MainWindow(QMainWindow):
             if previous_path is not None and entry.path.resolve() == previous_path.resolve():
                 selected_row = row
         self.playlist.blockSignals(False)
+        self._filter_playlist(self.search_edit.text())
         if self.playlist.count():
             self.playlist.setCurrentRow(selected_row)
 
@@ -498,6 +727,12 @@ class MainWindow(QMainWindow):
             self.edit_button.setEnabled(False)
             return
         path = Path(str(current.data(Qt.ItemDataRole.UserRole)))
+        if (
+            self.current_entry is not None
+            and path.resolve() != self.current_entry.path.resolve()
+            and (self.player.state is not PlaybackState.STOPPED or self._waiting_for_foreground)
+        ):
+            self.emergency_stop()
         try:
             text = path.read_text(encoding="utf-8")
             score = parse_score(text)
@@ -703,259 +938,6 @@ class MainWindow(QMainWindow):
         if editor in self._editors:
             self._editors.remove(editor)
 
-    def _show_settings(self) -> None:
-        """按当前映射模式显示并保存该 Profile 的键位配置。"""
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"配置方案 · {self.profile.name}")
-        dialog.resize(560, 650)
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(26, 24, 26, 20)
-        heading = QLabel("按键映射")
-        heading.setStyleSheet("font-size: 18px; font-weight: 600;")
-        layout.addWidget(heading)
-        name_edit = QLineEdit(self.profile.name)
-        name_edit.setPlaceholderText("输入配置方案名称")
-        name_form = QFormLayout()
-        name_form.addRow("方案名称", name_edit)
-        layout.addLayout(name_form)
-        mode_combo = QComboBox()
-        mode_names = {
-            MappingMode.DEGREE_MODIFIER: "音级 + 按住修饰键",
-            MappingMode.DIRECT_NOTE: "每个音符直接映射",
-            MappingMode.ROW_OCTAVE: "三行音区直接映射",
-        }
-        for mode, label in mode_names.items():
-            mode_combo.addItem(label, mode.value)
-        mode_combo.setCurrentIndex(list(mode_names).index(self.profile.mapping_mode))
-        layout.addWidget(mode_combo)
-        hint = QLabel()
-        hint.setObjectName("muted")
-        layout.addWidget(hint)
-
-        note_bindings = dict(self.profile.note_bindings)
-        zone_bindings = dict(self.profile.zone_bindings)
-        semitone_binding = self.profile.semitone_binding
-        direct_bindings = dict(self.profile.direct_note_bindings)
-        mapping_box = QWidget()
-        mapping_layout = QVBoxLayout(mapping_box)
-        mapping_layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(mapping_box, 1)
-
-        def request_binding() -> Binding | None:
-            """打开按键捕获窗口并返回用户录入的绑定。"""
-
-            return capture_binding(dialog)
-
-        def create_binding_button(
-            binding: Binding | None,
-            save: object,
-            prefix: str = "",
-        ) -> QPushButton:
-            """创建一个可捕获并保存键位的按钮。"""
-
-            def button_text(value: Binding | None) -> str:
-                """生成包含可选音级前缀的按钮文字。"""
-
-                label = value.label if value else "未设置"
-                return f"{prefix}\n{label}" if prefix else label
-
-            button = QPushButton(button_text(binding), objectName="binding")
-
-            def record() -> None:
-                """录入当前按钮对应的键位。"""
-
-                captured = request_binding()
-                if captured is not None:
-                    save(captured)
-                    button.setText(button_text(captured))
-
-            button.clicked.connect(record)
-            return button
-
-        def add_binding_row(grid: QGridLayout, row: int, label_text: str, binding: Binding | None, save: object) -> None:
-            """为映射网格加入一个可重新录入的按键按钮。"""
-
-            grid.addWidget(QLabel(label_text), row, 0)
-            grid.addWidget(create_binding_button(binding, save), row, 1)
-
-        def clear_mapping_layout(target: QLayout) -> None:
-            """递归移除切换映射模式后遗留的控件和子布局。"""
-
-            while target.count():
-                item = target.takeAt(0)
-                widget = item.widget()
-                child_layout = item.layout()
-                if widget is not None:
-                    widget.deleteLater()
-                elif child_layout is not None:
-                    clear_mapping_layout(child_layout)
-                    child_layout.deleteLater()
-
-        def rebuild_mapping() -> None:
-            """根据所选模式重建映射编辑区。"""
-
-            clear_mapping_layout(mapping_layout)
-            mode_value = mode_combo.currentData()
-            try:
-                mode = MappingMode(str(mode_value))
-            except ValueError:
-                return
-            if mode is MappingMode.DEGREE_MODIFIER:
-                hint.setText("适合三角洲等布局：中音无修饰，低/高音和半音按住修饰键。")
-                grid = QGridLayout()
-                names = ("Do", "Re", "Mi", "Fa", "Sol", "La", "Si")
-                for row, name in enumerate(names):
-                    degree = row + 1
-                    add_binding_row(
-                        grid, row, f"{degree}  {name}", note_bindings.get(degree),
-                        lambda value, item=degree: note_bindings.__setitem__(item, value),
-                    )
-                row = len(names)
-                for octave, label_text in ((Octave.LOW, "低音修饰"), (Octave.HIGH, "高音修饰")):
-                    add_binding_row(
-                        grid, row, label_text, zone_bindings.get(octave),
-                        lambda value, item=octave: zone_bindings.__setitem__(item, value),
-                    )
-                    row += 1
-                add_binding_row(
-                    grid, row, "半音修饰", semitone_binding,
-                    lambda value: setattr_holder(value),
-                )
-                grid.setColumnStretch(1, 1)
-                mapping_layout.addLayout(grid)
-                return
-
-            if mode is MappingMode.ROW_OCTAVE:
-                hint.setText("低、中、高三个音区各一行，每行按 1～7 直接映射，不使用半音行。")
-                grid = QGridLayout()
-                grid.setHorizontalSpacing(6)
-                for row, (octave, octave_label) in enumerate(
-                    ((Octave.LOW, "低音"), (Octave.MIDDLE, "中音"), (Octave.HIGH, "高音"))
-                ):
-                    grid.addWidget(QLabel(octave_label), row, 0)
-                    for degree in range(1, 8):
-                        note = NoteEvent(Fraction(0), Fraction(1), degree, octave, False)
-                        key = note_binding_key(note)
-                        button = create_binding_button(
-                            direct_bindings.get(key),
-                            lambda value, item=key: direct_bindings.__setitem__(item, value),
-                            str(degree),
-                        )
-                        grid.addWidget(button, row, degree)
-                mapping_layout.addLayout(grid)
-                mapping_layout.addStretch()
-                return
-
-            hint.setText("低、中、高音的自然音与半音分别成行，每个音符可独立绑定。")
-            grid = QGridLayout()
-            grid.setHorizontalSpacing(6)
-            row = 0
-            for octave, octave_label in ((Octave.LOW, "低"), (Octave.MIDDLE, "中"), (Octave.HIGH, "高")):
-                for is_semitone, prefix in ((False, ""), (True, "#")):
-                    grid.addWidget(QLabel(f"{prefix}{octave_label}音"), row, 0)
-                    for degree in range(1, 8):
-                        note = NoteEvent(Fraction(0), Fraction(1), degree, octave, is_semitone)
-                        key = note_binding_key(note)
-                        button = create_binding_button(
-                            direct_bindings.get(key),
-                            lambda value, item=key: direct_bindings.__setitem__(item, value),
-                            str(degree),
-                        )
-                        grid.addWidget(button, row, degree)
-                    row += 1
-            mapping_layout.addLayout(grid)
-
-        def setattr_holder(value: Binding) -> None:
-            """保存半音修饰键的闭包赋值。"""
-
-            nonlocal semitone_binding
-            semitone_binding = value
-
-        mode_combo.currentIndexChanged.connect(rebuild_mapping)
-        rebuild_mapping()
-
-        options = QFormLayout()
-        output_mode_combo = QComboBox()
-        output_mode_combo.addItem("短按触发（推荐）", NoteOutputMode.TAP.value)
-        output_mode_combo.addItem("持续按住", NoteOutputMode.HOLD.value)
-        output_mode_index = output_mode_combo.findData(self.profile.note_output_mode.value)
-        output_mode_combo.setCurrentIndex(max(0, output_mode_index))
-        hold_spin = QSpinBox()
-        hold_spin.setRange(10, 500)
-        hold_spin.setSuffix(" ms")
-        hold_spin.setValue(self.profile.key_hold_ms)
-        gap_spin = QSpinBox()
-        gap_spin.setRange(0, 200)
-        gap_spin.setSuffix(" ms")
-        gap_spin.setValue(self.profile.key_gap_ms)
-        options.addRow("音符输出方式", output_mode_combo)
-        options.addRow("按键时长", hold_spin)
-        options.addRow("最小释放间隔", gap_spin)
-        layout.addLayout(options)
-
-        def update_hold_control() -> None:
-            """根据输出方式启用或禁用固定按键时长。"""
-
-            is_tap = output_mode_combo.currentData() == NoteOutputMode.TAP.value
-            hold_spin.setEnabled(is_tap)
-            hold_spin.setToolTip(
-                "短按触发时使用固定按键时长"
-                if is_tap
-                else "持续按住模式由曲谱音符时值决定按键时长"
-            )
-
-        output_mode_combo.currentIndexChanged.connect(update_hold_control)
-        update_hold_control()
-
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
-        )
-        save_button = buttons.button(QDialogButtonBox.StandardButton.Save)
-        save_button.setText("保存")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
-
-        def update_save_button(text: str) -> None:
-            """根据方案名称是否变化提示保存或另存为。"""
-
-            save_button.setText("保存" if text.strip() == self.profile.name else "另存为新方案")
-
-        name_edit.textChanged.connect(update_save_button)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
-        self.hotkeys.stop()
-        result = dialog.exec()
-        self.hotkeys.start()
-        if result != QDialog.DialogCode.Accepted:
-            return
-        self._discard_playback_plan()
-        self.profile.note_bindings = note_bindings
-        self.profile.zone_bindings = zone_bindings
-        self.profile.semitone_binding = semitone_binding
-        try:
-            self.profile.mapping_mode = MappingMode(str(mode_combo.currentData()))
-            self.profile.note_output_mode = NoteOutputMode(
-                str(output_mode_combo.currentData())
-            )
-        except ValueError:
-            QMessageBox.warning(self, "设置保存失败", "未知的映射或音符输出模式")
-            return
-        self.profile.direct_note_bindings = direct_bindings
-        self.profile.key_hold_ms = hold_spin.value()
-        self.profile.key_gap_ms = gap_spin.value()
-        try:
-            self.profile_path = save_profile_with_name(
-                self.profile,
-                self.profile_path,
-                self.profiles_directory,
-                name_edit.text(),
-            )
-            self._refresh_profile_combo()
-            self.statusBar().showMessage(f"当前配置已保存并生效：{self.profile.name}")
-        except (OSError, ValueError) as exc:
-            QMessageBox.warning(self, "设置保存失败", str(exc))
-
     def _on_state_changed(self, value: str) -> None:
         """
         根据播放器状态更新播放按钮。
@@ -966,11 +948,14 @@ class MainWindow(QMainWindow):
 
         state = PlaybackState(value)
         if state is PlaybackState.PLAYING:
-            self.play_button.setText("暂停")
+            for button in self.play_buttons:
+                button.setText("暂停")
         elif state is PlaybackState.PAUSED:
-            self.play_button.setText("继续")
+            for button in self.play_buttons:
+                button.setText("继续")
         elif state is PlaybackState.STOPPED:
-            self.play_button.setText("播放")
+            for button in self.play_buttons:
+                button.setText("播放")
             self.playback_overlay.hide()
 
     def _on_event(self, event: object) -> None:
@@ -1006,6 +991,9 @@ class MainWindow(QMainWindow):
             event (QCloseEvent): Qt 关闭事件。
         """
 
+        if not self._confirm_discard_profile_changes():
+            event.ignore()
+            return
         self.hotkeys.stop()
         self.countdown_overlay.cancel()
         self.playback_overlay.hide()

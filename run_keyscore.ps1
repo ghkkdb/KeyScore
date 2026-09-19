@@ -4,7 +4,7 @@ $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pythonPath = Join-Path $projectRoot ".venv64\Scripts\python.exe"
 
 if (-not (Test-Path -LiteralPath $pythonPath)) {
-    throw "未找到 64 位虚拟环境。请先按 README.md 安装依赖。"
+    throw "The 64-bit virtual environment was not found. Follow README.md to install dependencies."
 }
 
 $env:PYTHONPATH = Join-Path $projectRoot "src"
