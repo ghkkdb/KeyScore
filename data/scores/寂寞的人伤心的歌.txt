@@ -1,5 +1,5 @@
 @title 寂寞的人伤心的歌
-@bpm 200
+@bpm 150
 @beat 4/4
 @section_gap 1
 

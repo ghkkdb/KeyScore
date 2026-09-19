@@ -54,6 +54,22 @@ class ScoreParserTests(unittest.TestCase):
         self.assertTrue(score.notes[1].is_semitone)
         self.assertEqual(score.notes[1].octave, Octave.HIGH)
 
+    def test_parse_five_octave_prefixes(self) -> None:
+        """双 L 和双 H 前缀应分别表示倍低音与倍高音。"""
+
+        score = parse_score("LL1 L2 3 H4 HH5:0.5")
+        self.assertEqual(
+            [note.octave for note in score.notes],
+            [
+                Octave.LOWEST,
+                Octave.LOW,
+                Octave.MIDDLE,
+                Octave.HIGH,
+                Octave.HIGHEST,
+            ],
+        )
+        self.assertEqual(score.notes[-1].duration_beats, Fraction(1, 2))
+
     def test_section_break_uses_configured_gap(self) -> None:
         """独立段落标记应按配置的拍数推进后续音符。"""
 

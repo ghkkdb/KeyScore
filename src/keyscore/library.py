@@ -112,6 +112,30 @@ class ScoreLibrary:
         )
         return ScoreEntry(title, path)
 
+    def save_score_text(self, text: str) -> ScoreEntry:
+        """
+        校验并将完整曲谱文本保存为新的库条目。
+
+        Args:
+            text (str): UTF-8 KeyScore 曲谱文本。
+
+        Returns:
+            ScoreEntry: 新保存的曲谱条目。
+
+        Raises:
+            ValueError: 文本不是有效曲谱时抛出。
+            OSError: 写入文件失败时抛出。
+        """
+
+        try:
+            score = parse_score(text)
+        except ScoreParseError as exc:
+            raise ValueError(str(exc)) from exc
+        path = self._unique_path(score.title)
+        normalized = text.rstrip() + "\n"
+        path.write_text(normalized, encoding="utf-8")
+        return ScoreEntry(score.title, path)
+
     def delete_score(self, entry: ScoreEntry) -> None:
         """
         删除曲谱库中的指定曲谱文件。

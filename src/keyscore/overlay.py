@@ -42,7 +42,7 @@ class _BaseOverlay(QWidget):
 
 
 class CountdownOverlay(_BaseOverlay):
-    """在屏幕中央显示等待提示和 3秒准备倒计时。"""
+    """在屏幕中央显示等待提示和可配置的准备倒计时。"""
 
     def __init__(self) -> None:
         """初始化倒计时悬浮层。"""
@@ -77,38 +77,115 @@ class CountdownOverlay(_BaseOverlay):
         self._remaining = 0
         self._finished: Callable[[], None] | None = None
 
-    def show_waiting(self, title: str) -> None:
+    def set_shortcuts(self, record_hotkey: str, stop_hotkey: str) -> None:
+        """
+        更新倒计时悬浮层中的快捷键提示。
+
+        Args:
+            record_hotkey (str): 录制快捷键显示文本。
+            stop_hotkey (str): 停止快捷键显示文本。
+        """
+
+        self._record_hotkey = record_hotkey
+        self._stop_hotkey = stop_hotkey
+
+    def show_waiting(self, title: str, visible: bool = True) -> None:
         """
         显示等待用户切换到游戏的提示。
 
         Args:
             title (str): 待播放曲名。
+            visible (bool): 是否显示悬浮提示。
         """
 
         self._timer.stop()
         self.number_label.setText("…")
         self.message_label.setText("等待切换到游戏")
         self.title_label.setText(f"《{title}》\n检测到游戏后将开始倒计时")
-        self.show()
-        self._move_center()
+        self.hint_label.setText(f"{getattr(self, '_stop_hotkey', 'F10')} 随时停止")
+        self._set_visible(visible)
 
-    def start_countdown(self, title: str, finished: Callable[[], None]) -> None:
+    def show_recording_waiting(self, seconds: int = 3, visible: bool = True) -> None:
         """
-        开始 3 秒倒计时。
+        显示等待用户切换到游戏以开始录制的提示。
+
+        Args:
+            seconds (int): 切换到游戏后的倒计时秒数。
+            visible (bool): 是否显示悬浮提示。
+        """
+
+        self._timer.stop()
+        self.number_label.setText("●")
+        self.message_label.setText("等待切换到游戏")
+        self.title_label.setText(f"检测到游戏窗口后将开始 {seconds} 秒倒计时")
+        self.hint_label.setText(f"{getattr(self, '_stop_hotkey', 'F10')} 随时停止")
+        self._set_visible(visible)
+
+    def start_countdown(
+        self,
+        title: str,
+        finished: Callable[[], None],
+        seconds: int = 3,
+        visible: bool = True,
+    ) -> None:
+        """
+        开始可配置时长的倒计时。
 
         Args:
             title (str): 待播放曲名。
             finished (Callable[[], None]): 倒计时完成回调。
+            seconds (int): 倒计时秒数。
+            visible (bool): 是否显示悬浮提示。
         """
 
-        self._remaining = 3
+        self._remaining = max(1, seconds)
         self._finished = finished
-        self.number_label.setText("3")
+        self.number_label.setText(str(self._remaining))
         self.message_label.setText("即将开始演奏")
         self.title_label.setText(f"《{title}》")
-        self.show()
-        self._move_center()
+        self.hint_label.setText(f"{getattr(self, '_stop_hotkey', 'F10')} 随时停止")
+        self._set_visible(visible)
         self._timer.start(1000)
+
+    def start_recording_countdown(
+        self,
+        finished: Callable[[], None],
+        seconds: int = 3,
+        visible: bool = True,
+    ) -> None:
+        """
+        开始录制前的可配置准备倒计时。
+
+        Args:
+            finished (Callable[[], None]): 倒计时完成回调。
+            seconds (int): 倒计时秒数。
+            visible (bool): 是否显示悬浮提示。
+        """
+
+        self._remaining = max(1, seconds)
+        self._finished = finished
+        self.number_label.setText(str(self._remaining))
+        self.message_label.setText("即将开始录制")
+        self.title_label.setText("请准备演奏")
+        record = getattr(self, "_record_hotkey", "F8")
+        stop = getattr(self, "_stop_hotkey", "F10")
+        self.hint_label.setText(f"{record} 完成    {stop} 紧急停止")
+        self._set_visible(visible)
+        self._timer.start(1000)
+
+    def _set_visible(self, visible: bool) -> None:
+        """
+        根据设置显示或隐藏提示，但不影响倒计时计时器。
+
+        Args:
+            visible (bool): 是否显示悬浮层。
+        """
+
+        if visible:
+            self.show()
+            self._move_center()
+        else:
+            self.hide()
 
     def cancel(self) -> None:
         """取消倒计时并隐藏悬浮层。"""
@@ -210,6 +287,17 @@ class PlaybackOverlay(_BaseOverlay):
         self.show()
         self._move_top_center(32)
 
+    def set_shortcuts(self, play_hotkey: str, stop_hotkey: str) -> None:
+        """
+        更新播放悬浮层中的快捷键提示。
+
+        Args:
+            play_hotkey (str): 播放控制快捷键显示文本。
+            stop_hotkey (str): 停止快捷键显示文本。
+        """
+
+        self.shortcut_label.setText(f"{play_hotkey} 暂停/继续    {stop_hotkey} 停止")
+
     def update_playback(self, ratio: float, note_text: str, paused: bool) -> None:
         """
         更新播放进度和当前音符。
@@ -223,3 +311,87 @@ class PlaybackOverlay(_BaseOverlay):
         self.progress.setValue(max(0, min(1000, int(ratio * 1000))))
         self.status_label.setText("已暂停" if paused else "演奏中")
         self.note_label.setText(note_text)
+
+
+class RecordingOverlay(_BaseOverlay):
+    """显示录制状态、时长、音符数量和当前音符。"""
+
+    def __init__(self) -> None:
+        """初始化录制悬浮条。"""
+
+        super().__init__()
+        self.setFixedSize(500, 104)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        card = QFrame(objectName="overlayCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(20, 14, 20, 14)
+        layout.setSpacing(9)
+        top = QHBoxLayout()
+        self.status_label = QLabel("● 等待第一个音符")
+        self.status_label.setStyleSheet("color: #D13438; font-weight: 700;")
+        self.time_label = QLabel("00:00.0")
+        self.time_label.setObjectName("muted")
+        top.addWidget(self.status_label)
+        top.addStretch()
+        top.addWidget(self.time_label)
+        bottom = QHBoxLayout()
+        self.note_label = QLabel("当前：等待音符")
+        self.note_label.setObjectName("muted")
+        self.count_label = QLabel("已记录 0 个音符")
+        self.count_label.setObjectName("muted")
+        self.hint_label = QLabel("F8 完成    F10 紧急停止")
+        self.hint_label.setObjectName("muted")
+        bottom.addWidget(self.note_label)
+        bottom.addWidget(self.count_label)
+        bottom.addStretch()
+        bottom.addWidget(self.hint_label)
+        layout.addLayout(top)
+        layout.addLayout(bottom)
+        outer.addWidget(card)
+
+    def set_shortcuts(self, record_hotkey: str, stop_hotkey: str) -> None:
+        """
+        更新录制悬浮层中的快捷键提示。
+
+        Args:
+            record_hotkey (str): 完成录制快捷键显示文本。
+            stop_hotkey (str): 紧急停止快捷键显示文本。
+        """
+
+        self.hint_label.setText(f"{record_hotkey} 完成    {stop_hotkey} 紧急停止")
+
+    def begin(self) -> None:
+        """显示等待首个有效音符的初始状态。"""
+
+        self.status_label.setText("● 等待第一个音符")
+        self.time_label.setText("00:00.0")
+        self.note_label.setText("当前：等待音符")
+        self.count_label.setText("已记录 0 个音符")
+        self.show()
+        self._move_top_center(32)
+
+    def update_recording(
+        self,
+        elapsed_ms: float,
+        note_count: int,
+        note_text: str,
+        paused: bool,
+    ) -> None:
+        """
+        更新录制悬浮条信息。
+
+        Args:
+            elapsed_ms (float): 已录制时间，不包含暂停区间。
+            note_count (int): 已识别音符数量。
+            note_text (str): 最近识别的音符文本。
+            paused (bool): 是否因为目标窗口失焦而暂停。
+        """
+
+        total_seconds = max(0.0, elapsed_ms / 1000.0)
+        minutes = int(total_seconds // 60)
+        seconds = total_seconds - minutes * 60
+        self.time_label.setText(f"{minutes:02d}:{seconds:04.1f}")
+        self.status_label.setText("已暂停：请切回游戏" if paused else "● 正在录制")
+        self.note_label.setText(f"当前：{note_text}")
+        self.count_label.setText(f"已记录 {note_count} 个音符")

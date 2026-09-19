@@ -28,7 +28,7 @@ def save_profile(profile: GameProfile, path: Path) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "version": 3,
+        "version": 4,
         "name": profile.name,
         "mapping_mode": profile.mapping_mode.value,
         "note_output_mode": profile.note_output_mode.value,

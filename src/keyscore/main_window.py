@@ -1,47 +1,62 @@
-"""键谱的三页导航、曲谱与播放主窗口。"""
+"""键谱的主导航、曲谱与播放主窗口。"""
 
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
+import time
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
+    QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QLineEdit,
+    QKeySequenceEdit,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QSplitter,
+    QSpinBox,
     QStackedWidget,
     QStatusBar,
     QVBoxLayout,
     QWidget,
 )
 
-from .app_settings import AppSettings, ThemeId, save_app_settings
+from .app_settings import AppSettings, ThemeId, load_app_settings, save_app_settings
+from . import __version__
 from .compiler import PlanCompileError, compile_score
 from .editor_window import ScoreEditorWindow
 from .foreground import foreground_window, is_foreground
-from .hotkeys import GlobalHotkeyListener
+from .hotkeys import (
+    GlobalHotkeyListener,
+    HotkeyValidationError,
+    hotkey_scan_code,
+    normalize_hotkey,
+)
 from .input_backend import WindowsSendInputBackend
 from .library import ScoreEntry, ScoreLibrary, default_data_directory
 from .models import (
     ActionType,
+    BindingKind,
     GameProfile,
     Octave,
     PlaybackPlan,
     TimedInputEvent,
 )
-from .overlay import CountdownOverlay, PlaybackOverlay
+from .overlay import CountdownOverlay, PlaybackOverlay, RecordingOverlay
 from .parser import ScoreParseError, parse_score
 from .playback import PlaybackState, TimelinePlayer
 from .profile_page import ProfileMappingPage
@@ -55,6 +70,17 @@ from .profile_store import (
     save_profile,
     save_profile_with_name,
 )
+from .recording.decoder import (
+    DecodedNoteStart,
+    RecordingDecodeError,
+    recording_profile_conflicts,
+    recording_reserved_shortcuts,
+)
+from .recording.dialogs import RecordingReviewDialog, RecordingSetupDialog
+from .recording.input_capture import GlobalInputCapture
+from .recording.models import PhysicalInputEvent, RecordingSettings
+from .recording.session import RecordingSession
+from .recording.transcriber import transcribe_take
 from .theme import THEME_LABELS, ThemeManager
 
 
@@ -66,6 +92,9 @@ class _UiSignals(QObject):
     state_changed = Signal(str)
     event_emitted = Signal(object)
     playback_error = Signal(str)
+    record_requested = Signal()
+    recording_input = Signal(object)
+    recording_error = Signal(str)
 
 
 class MainWindow(QMainWindow):
@@ -86,6 +115,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(860, 580)
         self.theme_manager = theme_manager
         self.app_settings_path = app_settings_path
+        self.app_settings = load_app_settings(app_settings_path)
 
         self.data_directory = default_data_directory()
         self.library = ScoreLibrary(self.data_directory)
@@ -98,6 +128,11 @@ class MainWindow(QMainWindow):
         self.target_hwnd = 0
         self.current_note_text = "等待音符"
         self._waiting_for_foreground = False
+        self._record_waiting_for_foreground = False
+        self._record_ready = False
+        self._record_paused = False
+        self.recording_session: RecordingSession | None = None
+        self.recording_settings: RecordingSettings | None = None
         self._editors: list[ScoreEditorWindow] = []
 
         self.signals = _UiSignals(self)
@@ -106,6 +141,9 @@ class MainWindow(QMainWindow):
         self.signals.state_changed.connect(self._on_state_changed)
         self.signals.event_emitted.connect(self._on_event)
         self.signals.playback_error.connect(self._on_playback_error)
+        self.signals.record_requested.connect(self.toggle_recording)
+        self.signals.recording_input.connect(self._on_recording_input)
+        self.signals.recording_error.connect(self._on_recording_error)
 
         self.backend = WindowsSendInputBackend()
         self.player = TimelinePlayer(
@@ -116,9 +154,18 @@ class MainWindow(QMainWindow):
         )
         self.countdown_overlay = CountdownOverlay()
         self.playback_overlay = PlaybackOverlay()
+        self.recording_overlay = RecordingOverlay()
+        self.input_capture = GlobalInputCapture(
+            on_event=self.signals.recording_input.emit,
+            on_error=self.signals.recording_error.emit,
+        )
         self.hotkeys = GlobalHotkeyListener(
             on_toggle=self.signals.toggle_requested.emit,
             on_stop=self.signals.stop_requested.emit,
+            on_record=self.signals.record_requested.emit,
+            play_hotkey=self.app_settings.play_hotkey,
+            stop_hotkey=self.app_settings.stop_hotkey,
+            record_hotkey=self.app_settings.record_hotkey,
         )
 
         self._build_ui()
@@ -136,7 +183,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._start_hotkeys)
 
     def _build_ui(self) -> None:
-        """创建固定顶部栏、左侧导航和三页工作区。"""
+        """创建固定顶部栏、左侧导航和四页工作区。"""
 
         central = QWidget(objectName="centralPanel")
         root = QVBoxLayout(central)
@@ -153,14 +200,17 @@ class MainWindow(QMainWindow):
         sidebar_layout.setContentsMargins(12, 18, 12, 14)
         sidebar_layout.setSpacing(8)
         self.navigation_buttons: list[QPushButton] = []
-        for index, text in enumerate(("曲谱", "按键映射", "设置")):
+        for index, text in enumerate(("曲谱", "按键映射", "设置", "关于")):
             button = QPushButton(text, objectName="navigation")
             button.setProperty("active", index == 0)
             button.clicked.connect(lambda _checked=False, page=index: self._switch_page(page))
             sidebar_layout.addWidget(button)
             self.navigation_buttons.append(button)
         sidebar_layout.addStretch()
-        version = QLabel("KeyScore v1.0\n用键盘，奏响你的音乐", objectName="muted")
+        version = QLabel(
+            f"KeyScore v{__version__}\n用键盘，奏响你的音乐",
+            objectName="muted",
+        )
         sidebar_layout.addWidget(version)
 
         self.pages = QStackedWidget()
@@ -171,12 +221,17 @@ class MainWindow(QMainWindow):
         self.profile_page.import_requested.connect(self._import_profile)
         self.pages.addWidget(self.profile_page)
         self.pages.addWidget(self._build_settings_page())
+        self.pages.addWidget(self._build_about_page())
         body.addWidget(sidebar)
         body.addWidget(self.pages, 1)
         root.addLayout(body, 1)
         self.setCentralWidget(central)
         self.setStatusBar(QStatusBar())
-        self.statusBar().showMessage("就绪：选择曲谱后在游戏前台按 F9")
+        self._refresh_hotkey_labels()
+        self.statusBar().showMessage(
+            f"就绪：{self.app_settings.record_hotkey} 录制游戏演奏，"
+            f"{self.app_settings.play_hotkey} 播放当前曲谱"
+        )
         self._refresh_profile_combo()
 
     def _build_header(self) -> QWidget:
@@ -201,8 +256,10 @@ class MainWindow(QMainWindow):
         header_stop_button.clicked.connect(self.emergency_stop)
         next_button = QPushButton("下一首")
         next_button.clicked.connect(self._next_score)
-        shortcut_hint = QLabel("F9  播放 / 暂停    F10  停止")
-        shortcut_hint.setObjectName("muted")
+        self.header_record_button = QPushButton("● 录制")
+        self.header_record_button.clicked.connect(self.toggle_recording)
+        self.shortcut_hint = QLabel()
+        self.shortcut_hint.setObjectName("muted")
         self.profile_combo = QComboBox()
         self.profile_combo.setMinimumWidth(190)
         self.profile_combo.setEditable(True)
@@ -218,8 +275,9 @@ class MainWindow(QMainWindow):
         header.addWidget(self.header_play_button)
         header.addWidget(header_stop_button)
         header.addWidget(next_button)
+        header.addWidget(self.header_record_button)
         header.addSpacing(10)
-        header.addWidget(shortcut_hint)
+        header.addWidget(self.shortcut_hint)
         header.addSpacing(12)
         header.addWidget(self.profile_combo)
         return header_widget
@@ -242,12 +300,16 @@ class MainWindow(QMainWindow):
         heading_box.addWidget(QLabel("管理、预览、编辑和播放本地曲谱", objectName="muted"))
         import_button = QPushButton("导入")
         import_button.clicked.connect(self._import_score)
+        self.page_record_button = QPushButton("录制演奏")
+        self.page_record_button.clicked.connect(self.toggle_recording)
         new_button = QPushButton("新建曲谱", objectName="primary")
         new_button.clicked.connect(self._new_score)
         heading_row.addLayout(heading_box)
         heading_row.addStretch()
         heading_row.addWidget(import_button)
+        heading_row.addWidget(self.page_record_button)
         heading_row.addWidget(new_button)
+        self.record_buttons = [self.header_record_button, self.page_record_button]
         layout.addLayout(heading_row)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -350,7 +412,7 @@ class MainWindow(QMainWindow):
 
     def _build_settings_page(self) -> QWidget:
         """
-        创建只包含应用级选项的设置页面。
+        创建带外观和快捷键二级分类的应用设置页面。
 
         Returns:
             QWidget: 全局设置页面。
@@ -361,15 +423,56 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(24, 20, 24, 18)
         layout.setSpacing(14)
         layout.addWidget(QLabel("设置", objectName="displayTitle"))
-        layout.addWidget(QLabel("管理不随按键配置方案变化的全局选项", objectName="muted"))
-        card = QWidget(objectName="pageCard")
+        layout.addWidget(
+            QLabel("管理 KeyScore 的全局选项", objectName="muted")
+        )
+
+        settings_card = QWidget(objectName="pageCard")
+        settings_layout = QHBoxLayout(settings_card)
+        settings_layout.setContentsMargins(0, 0, 0, 0)
+        settings_layout.setSpacing(0)
+        self.settings_categories = QListWidget()
+        self.settings_categories.setObjectName("settingsCategories")
+        self.settings_categories.setFixedWidth(170)
+        self.settings_categories.setSpacing(3)
+        self.settings_categories.addItems(("外观", "快捷键"))
+        self.settings_categories.setCurrentRow(0)
+        settings_layout.addWidget(self.settings_categories)
+
+        self.settings_stack = QStackedWidget()
+        self.settings_stack.addWidget(self._build_appearance_settings())
+        self.settings_stack.addWidget(self._build_shortcut_settings())
+        self.settings_categories.currentRowChanged.connect(
+            self.settings_stack.setCurrentIndex
+        )
+        settings_layout.addWidget(self.settings_stack, 1)
+        layout.addWidget(settings_card, 1)
+        return page
+
+    def _build_appearance_settings(self) -> QWidget:
+        """
+        创建外观分类内容。
+
+        Returns:
+            QWidget: 外观设置页面。
+        """
+
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(24, 22, 24, 22)
+        page_layout.setSpacing(14)
+        page_layout.addWidget(QLabel("外观", objectName="dialogTitle"))
+        page_layout.addWidget(
+            QLabel("调整 KeyScore 的界面显示方式", objectName="muted")
+        )
+        card = QWidget(objectName="settingsSection")
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(20, 18, 20, 18)
+        card_layout.setContentsMargins(18, 16, 18, 16)
         card_layout.setSpacing(12)
-        card_layout.addWidget(QLabel("外观", objectName="sectionLabel"))
+        card_layout.addWidget(QLabel("界面风格", objectName="sectionLabel"))
         theme_row = QHBoxLayout()
         theme_description = QVBoxLayout()
-        theme_description.addWidget(QLabel("界面风格"))
+        theme_description.addWidget(QLabel("主题"))
         theme_description.addWidget(
             QLabel("应用到主窗口、编辑器、对话框和播放悬浮层", objectName="muted")
         )
@@ -384,13 +487,171 @@ class MainWindow(QMainWindow):
         theme_row.addLayout(theme_description, 1)
         theme_row.addWidget(self.theme_combo)
         card_layout.addLayout(theme_row)
-        card_layout.addSpacing(12)
-        card_layout.addWidget(QLabel("数据", objectName="sectionLabel"))
-        data_label = QLabel(f"应用数据目录\n{self.data_directory}", objectName="muted")
+        page_layout.addWidget(card)
+
+        overlay_card = QWidget(objectName="settingsSection")
+        overlay_layout = QGridLayout(overlay_card)
+        overlay_layout.setContentsMargins(18, 16, 18, 16)
+        overlay_layout.setHorizontalSpacing(24)
+        overlay_layout.setVerticalSpacing(12)
+        overlay_layout.addWidget(QLabel("悬浮层", objectName="sectionLabel"), 0, 0, 1, 2)
+        overlay_layout.addWidget(QLabel("播放时显示曲名、进度和当前音符"), 1, 0)
+        self.playback_overlay_check = QCheckBox("显示播放悬浮层")
+        self.playback_overlay_check.setChecked(self.app_settings.show_playback_overlay)
+        overlay_layout.addWidget(self.playback_overlay_check, 1, 1)
+        overlay_layout.addWidget(QLabel("开始播放或录制前的准备时间"), 2, 0)
+        self.countdown_seconds_spin = QSpinBox()
+        self.countdown_seconds_spin.setRange(1, 10)
+        self.countdown_seconds_spin.setSuffix(" 秒")
+        self.countdown_seconds_spin.setValue(self.app_settings.countdown_seconds)
+        overlay_layout.addWidget(self.countdown_seconds_spin, 2, 1)
+        overlay_layout.addWidget(QLabel("等待切换窗口及倒计时期间显示提示"), 3, 0)
+        self.countdown_overlay_check = QCheckBox("显示倒计时悬浮提示")
+        self.countdown_overlay_check.setChecked(self.app_settings.show_countdown_overlay)
+        overlay_layout.addWidget(self.countdown_overlay_check, 3, 1)
+        overlay_layout.setColumnStretch(0, 1)
+        self.playback_overlay_check.toggled.connect(self._save_overlay_settings)
+        self.countdown_seconds_spin.valueChanged.connect(self._save_overlay_settings)
+        self.countdown_overlay_check.toggled.connect(self._save_overlay_settings)
+        page_layout.addWidget(overlay_card)
+        page_layout.addStretch()
+        return page
+
+    def _build_shortcut_settings(self) -> QWidget:
+        """
+        创建可编辑的全局快捷键分类。
+
+        Returns:
+            QWidget: 快捷键设置页面。
+        """
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(14)
+        layout.addWidget(QLabel("快捷键", objectName="dialogTitle"))
+        layout.addWidget(
+            QLabel("自定义用于控制 KeyScore 的全局快捷键", objectName="muted")
+        )
+        shortcuts = QWidget(objectName="settingsSection")
+        shortcuts_layout = QGridLayout(shortcuts)
+        shortcuts_layout.setContentsMargins(18, 16, 18, 16)
+        shortcuts_layout.setHorizontalSpacing(24)
+        shortcuts_layout.setVerticalSpacing(12)
+        shortcuts_layout.addWidget(QLabel("全局控制快捷键", objectName="sectionLabel"), 0, 0, 1, 2)
+        shortcuts_layout.addWidget(QLabel("功能", objectName="muted"), 1, 0)
+        shortcuts_layout.addWidget(QLabel("快捷键", objectName="muted"), 1, 1)
+        editors: list[QKeySequenceEdit] = []
+        for row, (action, shortcut) in enumerate(
+            (
+                ("开始 / 完成录制", self.app_settings.record_hotkey),
+                ("播放 / 暂停 / 继续", self.app_settings.play_hotkey),
+                ("紧急停止", self.app_settings.stop_hotkey),
+            ),
+            start=2,
+        ):
+            shortcuts_layout.addWidget(QLabel(action), row, 0)
+            editor = QKeySequenceEdit(QKeySequence(shortcut.replace("Win+", "Meta+")))
+            editor.setMaximumSequenceLength(1)
+            editors.append(editor)
+            shortcuts_layout.addWidget(editor, row, 1)
+        self.record_hotkey_edit, self.play_hotkey_edit, self.stop_hotkey_edit = editors
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        restore_button = QPushButton("恢复默认")
+        restore_button.clicked.connect(self._restore_default_hotkeys)
+        save_button = QPushButton("保存快捷键", objectName="primary")
+        save_button.clicked.connect(self._save_hotkey_settings)
+        buttons.addWidget(restore_button)
+        buttons.addWidget(save_button)
+        shortcuts_layout.addLayout(buttons, 5, 0, 1, 2)
+        shortcuts_layout.addWidget(
+            QLabel("支持单键或 Ctrl / Alt / Shift / Win 组合键；三项不能重复。", objectName="muted"),
+            6, 0, 1, 2,
+        )
+        shortcuts_layout.setColumnStretch(0, 1)
+        layout.addWidget(shortcuts)
+
+        mapping = QWidget(objectName="settingsSection")
+        mapping_layout = QVBoxLayout(mapping)
+        mapping_layout.setContentsMargins(18, 16, 18, 16)
+        mapping_layout.setSpacing(10)
+        mapping_layout.addWidget(QLabel("游戏演奏按键", objectName="sectionLabel"))
+        mapping_layout.addWidget(
+            QLabel(
+                "音符、音区和鼠标按键不属于全局快捷键，请在“按键映射”页面中设置。",
+                objectName="muted",
+            )
+        )
+        mapping_button_row = QHBoxLayout()
+        mapping_button_row.addStretch()
+        mapping_button = QPushButton("前往按键映射")
+        mapping_button.clicked.connect(self._open_profile_page_from_settings)
+        mapping_button_row.addWidget(mapping_button)
+        mapping_layout.addLayout(mapping_button_row)
+        layout.addWidget(mapping)
+        layout.addStretch()
+        return page
+
+    def _build_about_page(self) -> QWidget:
+        """
+        创建与设置同级的版本、运行信息和本地数据目录页面。
+
+        Returns:
+            QWidget: 关于页面。
+        """
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 20, 24, 18)
+        layout.setSpacing(14)
+        layout.addWidget(QLabel("关于", objectName="displayTitle"))
+        layout.addWidget(QLabel("KeyScore 的版本和本地运行信息", objectName="muted"))
+
+        product = QWidget(objectName="settingsSection")
+        product_layout = QVBoxLayout(product)
+        product_layout.setContentsMargins(18, 16, 18, 16)
+        product_layout.setSpacing(7)
+        product_layout.addWidget(QLabel("KeyScore 键谱", objectName="dialogTitle"))
+        product_layout.addWidget(QLabel(f"版本 {__version__}", objectName="muted"))
+        product_layout.addWidget(
+            QLabel(
+                "面向 Windows 游戏乐器的曲谱编辑、自动演奏和游戏演奏录制工具。",
+                objectName="muted",
+            )
+        )
+        layout.addWidget(product)
+
+        information = QWidget(objectName="settingsSection")
+        information_layout = QVBoxLayout(information)
+        information_layout.setContentsMargins(18, 16, 18, 16)
+        information_layout.setSpacing(10)
+        information_layout.addWidget(QLabel("应用信息", objectName="sectionLabel"))
+        information_form = QFormLayout()
+        information_form.setSpacing(10)
+        information_form.addRow("运行平台", QLabel("Windows 10 / 11"))
+        information_form.addRow("界面框架", QLabel("PySide6"))
+        information_form.addRow("数据存储", QLabel("仅保存在本地"))
+        information_layout.addLayout(information_form)
+        layout.addWidget(information)
+
+        data = QWidget(objectName="settingsSection")
+        data_layout = QVBoxLayout(data)
+        data_layout.setContentsMargins(18, 16, 18, 16)
+        data_layout.setSpacing(10)
+        data_layout.addWidget(QLabel("应用数据目录", objectName="sectionLabel"))
+        data_label = QLabel(str(self.data_directory), objectName="muted")
+        data_label.setWordWrap(True)
         data_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        card_layout.addWidget(data_label)
-        card_layout.addStretch()
-        layout.addWidget(card, 1)
+        data_layout.addWidget(data_label)
+        data_button_row = QHBoxLayout()
+        data_button_row.addStretch()
+        open_data_button = QPushButton("打开数据目录")
+        open_data_button.clicked.connect(self._open_data_directory)
+        data_button_row.addWidget(open_data_button)
+        data_layout.addLayout(data_button_row)
+        layout.addWidget(data)
+        layout.addStretch()
         return page
 
     def _build_menu(self) -> None:
@@ -401,6 +662,8 @@ class MainWindow(QMainWindow):
         new_action.triggered.connect(self._new_score)
         import_action = QAction("导入曲谱…", self)
         import_action.triggered.connect(self._import_score)
+        record_action = QAction("录制游戏演奏…", self)
+        record_action.triggered.connect(self.toggle_recording)
         edit_action = QAction("编辑当前曲谱", self)
         edit_action.triggered.connect(self._edit_current)
         delete_action = QAction("删除当前曲谱", self)
@@ -409,7 +672,7 @@ class MainWindow(QMainWindow):
         new_profile_action.triggered.connect(self._new_profile)
         import_profile_action = QAction("导入配置方案…", self)
         import_profile_action.triggered.connect(self._import_profile)
-        menu.addActions((new_action, import_action, edit_action, delete_action))
+        menu.addActions((new_action, import_action, record_action, edit_action, delete_action))
         menu.addSeparator()
         menu.addActions((new_profile_action, import_profile_action))
 
@@ -500,6 +763,8 @@ class MainWindow(QMainWindow):
     def _discard_playback_plan(self) -> None:
         """停止当前播放并清除使用旧 Profile 编译的时间轴。"""
 
+        if self.recording_session is not None:
+            self._cancel_recording()
         self._waiting_for_foreground = False
         self.countdown_overlay.cancel()
         self.player.stop(wait=True)
@@ -583,7 +848,7 @@ class MainWindow(QMainWindow):
         切换主工作区页面并更新侧栏选中态。
 
         Args:
-            index (int): 页面索引，依次为曲谱、按键映射和设置。
+            index (int): 页面索引，依次为曲谱、按键映射、设置和关于。
         """
 
         if not 0 <= index < self.pages.count():
@@ -595,6 +860,17 @@ class MainWindow(QMainWindow):
             style.unpolish(button)
             style.polish(button)
             button.update()
+
+    def _open_profile_page_from_settings(self) -> None:
+        """从快捷键说明直接切换到主导航的按键映射页面。"""
+
+        self._switch_page(1)
+
+    def _open_data_directory(self) -> None:
+        """使用系统文件管理器打开 KeyScore 应用数据目录。"""
+
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.data_directory))):
+            QMessageBox.warning(self, "无法打开目录", str(self.data_directory))
 
     def _previous_score(self) -> None:
         """选择歌单中的上一首曲谱。"""
@@ -642,12 +918,165 @@ class MainWindow(QMainWindow):
         except ValueError:
             theme = ThemeId.FLUENT
         self.theme_manager.apply(theme)
+        updated = replace(self.app_settings, theme=theme)
         try:
-            save_app_settings(AppSettings(theme=theme), self.app_settings_path)
+            save_app_settings(updated, self.app_settings_path)
         except OSError as exc:
             QMessageBox.warning(self, "主题保存失败", f"主题已临时生效，但无法保存：{exc}")
             return
+        self.app_settings = updated
         self.statusBar().showMessage(f"界面风格已切换为：{THEME_LABELS[theme]}")
+
+    def _save_overlay_settings(self, _value: object = None) -> None:
+        """
+        即时保存悬浮层显示选项和倒计时时长。
+
+        Args:
+            _value (object): Qt 控件信号携带但无需使用的值。
+        """
+
+        updated = replace(
+            self.app_settings,
+            show_playback_overlay=self.playback_overlay_check.isChecked(),
+            countdown_seconds=self.countdown_seconds_spin.value(),
+            show_countdown_overlay=self.countdown_overlay_check.isChecked(),
+        )
+        try:
+            save_app_settings(updated, self.app_settings_path)
+        except OSError as exc:
+            QMessageBox.warning(self, "悬浮层设置保存失败", str(exc))
+            return
+        self.app_settings = updated
+        if not updated.show_playback_overlay:
+            self.playback_overlay.hide()
+        elif self.plan is not None and self.player.state is not PlaybackState.STOPPED:
+            self.playback_overlay.begin(self.plan.title, self.plan.bpm)
+            ratio = (
+                min(1.0, self.player.position_ms / self.plan.duration_ms)
+                if self.plan.duration_ms > 0
+                else 0.0
+            )
+            self.playback_overlay.update_playback(
+                ratio,
+                self.current_note_text,
+                self.player.state is PlaybackState.PAUSED,
+            )
+        if not updated.show_countdown_overlay:
+            self.countdown_overlay.hide()
+        self.statusBar().showMessage("悬浮层设置已保存")
+
+    def _hotkey_text(self, editor: QKeySequenceEdit) -> str:
+        """
+        读取并规范化快捷键编辑器中的单段组合键。
+
+        Args:
+            editor (QKeySequenceEdit): 待读取的快捷键编辑器。
+
+        Returns:
+            str: 规范化后的快捷键文本。
+
+        Raises:
+            HotkeyValidationError: 快捷键为空或包含不支持的按键时抛出。
+        """
+
+        text = editor.keySequence().toString(QKeySequence.SequenceFormat.PortableText)
+        return normalize_hotkey(text)
+
+    def _set_hotkey_editors(self, settings: AppSettings) -> None:
+        """
+        将应用设置中的快捷键回填到三个编辑器。
+
+        Args:
+            settings (AppSettings): 快捷键来源设置。
+        """
+
+        self.record_hotkey_edit.setKeySequence(
+            QKeySequence(settings.record_hotkey.replace("Win+", "Meta+"))
+        )
+        self.play_hotkey_edit.setKeySequence(
+            QKeySequence(settings.play_hotkey.replace("Win+", "Meta+"))
+        )
+        self.stop_hotkey_edit.setKeySequence(
+            QKeySequence(settings.stop_hotkey.replace("Win+", "Meta+"))
+        )
+
+    def _restore_default_hotkeys(self) -> None:
+        """恢复并立即保存 F8、F9、F10 默认全局快捷键。"""
+
+        defaults = AppSettings()
+        self._set_hotkey_editors(defaults)
+        self._save_hotkey_settings()
+
+    def _save_hotkey_settings(self) -> None:
+        """校验、注册并持久化用户编辑的三个全局快捷键。"""
+
+        previous = self.app_settings
+        try:
+            record_hotkey = self._hotkey_text(self.record_hotkey_edit)
+            play_hotkey = self._hotkey_text(self.play_hotkey_edit)
+            stop_hotkey = self._hotkey_text(self.stop_hotkey_edit)
+            if len({record_hotkey, play_hotkey, stop_hotkey}) != 3:
+                raise HotkeyValidationError("三个全局快捷键不能重复")
+        except HotkeyValidationError as exc:
+            QMessageBox.warning(self, "快捷键无效", str(exc))
+            return
+
+        if not self.hotkeys.configure(record_hotkey, play_hotkey, stop_hotkey):
+            self.hotkeys.configure(
+                previous.record_hotkey,
+                previous.play_hotkey,
+                previous.stop_hotkey,
+            )
+            self._set_hotkey_editors(previous)
+            QMessageBox.warning(
+                self,
+                "快捷键注册失败",
+                "至少一个快捷键已被其他程序占用，原快捷键已恢复。",
+            )
+            return
+
+        updated = replace(
+            previous,
+            record_hotkey=record_hotkey,
+            play_hotkey=play_hotkey,
+            stop_hotkey=stop_hotkey,
+        )
+        try:
+            save_app_settings(updated, self.app_settings_path)
+        except OSError as exc:
+            self.hotkeys.configure(
+                previous.record_hotkey,
+                previous.play_hotkey,
+                previous.stop_hotkey,
+            )
+            self._set_hotkey_editors(previous)
+            QMessageBox.warning(self, "快捷键保存失败", str(exc))
+            return
+        self.app_settings = updated
+        self._set_hotkey_editors(updated)
+        self._refresh_hotkey_labels()
+        self.statusBar().showMessage("全局快捷键已保存并立即生效")
+
+    def _refresh_hotkey_labels(self) -> None:
+        """刷新主窗口和各悬浮层中的快捷键说明。"""
+
+        settings = self.app_settings
+        self.shortcut_hint.setText(
+            f"{settings.record_hotkey} 录制    {settings.play_hotkey} 播放 / 暂停    "
+            f"{settings.stop_hotkey} 停止"
+        )
+        self.countdown_overlay.set_shortcuts(
+            settings.record_hotkey,
+            settings.stop_hotkey,
+        )
+        self.playback_overlay.set_shortcuts(
+            settings.play_hotkey,
+            settings.stop_hotkey,
+        )
+        self.recording_overlay.set_shortcuts(
+            settings.record_hotkey,
+            settings.stop_hotkey,
+        )
 
     def _save_profile_changes(self, profile: object, name: str) -> None:
         """
@@ -680,10 +1109,29 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"当前配置已保存并生效：{self.profile.name}")
 
     def _start_hotkeys(self) -> None:
-        """启动全局 F9/F10 监听器。"""
+        """启动当前配置的三个全局快捷键监听器。"""
 
         if not self.hotkeys.start():
-            self.statusBar().showMessage("未安装 pynput：全局 F9/F10 暂不可用")
+            self.statusBar().showMessage("全局快捷键注册失败，可能已被其他程序占用")
+
+    def _reserved_hotkey_inputs(self) -> tuple[tuple[int, str], ...]:
+        """
+        返回录制时必须排除的全局快捷键主键扫描码。
+
+        Returns:
+            tuple[tuple[int, str], ...]: 非零扫描码与快捷键显示文本。
+        """
+
+        values = (
+            self.app_settings.record_hotkey,
+            self.app_settings.play_hotkey,
+            self.app_settings.stop_hotkey,
+        )
+        return tuple(
+            (scan_code, value)
+            for value in values
+            if (scan_code := hotkey_scan_code(value)) != 0
+        )
 
     def _refresh_library(self, select_path: Path | None = None) -> None:
         """
@@ -745,13 +1193,227 @@ class MainWindow(QMainWindow):
             return
         self.current_entry = ScoreEntry(score.title, path)
         self.score_title.setText(score.title)
-        self.score_meta.setText(f"{score.bpm} BPM   ·   {float(score.total_beats):g} 拍   ·   {len(score.notes)} 个音符")
+        self.score_meta.setText(
+            f"{score.bpm} BPM   ·   {float(score.total_beats):g} 拍   ·   "
+            f"{len(score.notes)} 个音符"
+        )
         self.preview.setPlainText(text)
         self.edit_button.setEnabled(True)
 
     @Slot()
+    def toggle_recording(self) -> None:
+        """开始新的游戏演奏录制，或完成当前录制并进入整理。"""
+
+        if self.recording_session is not None:
+            self._finish_recording()
+            return
+        conflicts = recording_profile_conflicts(self.profile)
+        if conflicts:
+            QMessageBox.warning(
+                self,
+                "无法开始录制",
+                "当前配置存在无法反向判断的重复按键：\n" + "\n".join(conflicts),
+            )
+            return
+        reserved = recording_reserved_shortcuts(
+            self.profile,
+            self._reserved_hotkey_inputs(),
+        )
+        if reserved:
+            QMessageBox.warning(
+                self,
+                "无法开始录制",
+                "当前配置占用了录制控制快捷键："
+                + "、".join(reserved)
+                + "。请先更换这些映射。",
+            )
+            return
+
+        default_bpm = 100
+        default_beat = "4/4"
+        if self.current_entry is not None:
+            try:
+                current_score = parse_score(
+                    self.current_entry.path.read_text(encoding="utf-8")
+                )
+                default_bpm = current_score.bpm
+                default_beat = current_score.beat
+            except (OSError, UnicodeError, ScoreParseError):
+                pass
+        dialog = RecordingSetupDialog(default_bpm, default_beat, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        self.emergency_stop()
+        try:
+            session = RecordingSession(self.profile)
+        except RecordingDecodeError as exc:
+            QMessageBox.warning(self, "无法开始录制", str(exc))
+            return
+        if not self.input_capture.start():
+            QMessageBox.warning(
+                self,
+                "无法开始录制",
+                "系统全局键鼠监听器启动失败，请检查运行权限后重试。",
+            )
+            return
+        self.recording_session = session
+        self.recording_settings = dialog.settings()
+        self._record_waiting_for_foreground = True
+        self._record_ready = False
+        self._record_paused = False
+        self.target_hwnd = 0
+        self.profile_combo.setEnabled(False)
+        for button in self.record_buttons:
+            button.setText("完成录制")
+        self.countdown_overlay.show_recording_waiting(
+            self.app_settings.countdown_seconds,
+            self.app_settings.show_countdown_overlay,
+        )
+        self.statusBar().showMessage("录制已准备，请切换到游戏窗口")
+
+    def _begin_recording_after_countdown(self) -> None:
+        """倒计时完成后验证游戏仍在前台，并进入事件录制状态。"""
+
+        if self.recording_session is None:
+            return
+        if not is_foreground(self.target_hwnd):
+            self._record_waiting_for_foreground = True
+            self.countdown_overlay.show_recording_waiting(
+                self.app_settings.countdown_seconds,
+                self.app_settings.show_countdown_overlay,
+            )
+            return
+        self._record_ready = True
+        self._record_paused = False
+        self.recording_overlay.begin()
+        self.statusBar().showMessage(
+            f"正在录制：{self.app_settings.record_hotkey} 完成，"
+            f"{self.app_settings.stop_hotkey} 紧急停止"
+        )
+
+    @Slot(object)
+    def _on_recording_input(self, value: object) -> None:
+        """
+        在 Qt 主线程中把全局物理事件交给录制会话。
+
+        Args:
+            value (object): 输入监听线程发来的事件。
+        """
+
+        if not isinstance(value, PhysicalInputEvent):
+            return
+        if (
+            self.recording_session is None
+            or not self._record_ready
+            or self._record_paused
+            or not is_foreground(self.target_hwnd)
+        ):
+            return
+        reserved_codes = {code for code, _label in self._reserved_hotkey_inputs()}
+        if (
+            value.binding.kind is BindingKind.KEYBOARD
+            and value.binding.code in reserved_codes
+        ):
+            return
+        try:
+            started = self.recording_session.feed(value)
+        except RecordingDecodeError as exc:
+            self._on_recording_error(str(exc))
+            return
+        if isinstance(started, DecodedNoteStart):
+            prefix = {
+                Octave.LOWEST: "倍低音 ",
+                Octave.LOW: "低音 ",
+                Octave.MIDDLE: "",
+                Octave.HIGH: "高音 ",
+                Octave.HIGHEST: "倍高音 ",
+            }[started.octave]
+            sharp = "#" if started.is_semitone else ""
+            self.current_note_text = f"{sharp}{prefix}{started.degree}"
+
+    @Slot(str)
+    def _on_recording_error(self, message: str) -> None:
+        """
+        停止发生异常的录制并显示错误。
+
+        Args:
+            message (str): 输入监听或反向解码异常。
+        """
+
+        if self.recording_session is None:
+            self.statusBar().showMessage(f"录制监听异常：{message}")
+            return
+        self._cancel_recording()
+        QMessageBox.warning(self, "录制已停止", message)
+
+    def _finish_recording(self) -> None:
+        """停止捕获、生成曲谱，并打开录制整理对话框。"""
+
+        session = self.recording_session
+        settings = self.recording_settings
+        if session is None or settings is None:
+            return
+        self._record_ready = False
+        self.input_capture.stop()
+        take = session.finish(time.perf_counter_ns() / 1_000_000.0)
+        self._reset_recording_ui()
+        if not take.notes:
+            QMessageBox.information(self, "没有录制内容", "没有检测到当前配置中的有效音符。")
+            return
+        try:
+            score_text = transcribe_take(take, settings, self.profile.note_output_mode)
+        except ValueError as exc:
+            QMessageBox.warning(self, "转谱失败", str(exc))
+            return
+
+        while True:
+            review = RecordingReviewDialog(score_text, len(take.notes), self)
+            if review.exec() != QDialog.DialogCode.Accepted:
+                self.statusBar().showMessage("已放弃本次录制")
+                return
+            score_text = review.score_text()
+            try:
+                entry = self.library.save_score_text(score_text)
+            except (OSError, UnicodeError, ValueError) as exc:
+                QMessageBox.warning(self, "无法保存录制", str(exc))
+                continue
+            self._refresh_library(entry.path)
+            self._switch_page(0)
+            self._open_editor(entry.path)
+            self.statusBar().showMessage(f"录制已保存：{entry.title}")
+            return
+
+    def _cancel_recording(self) -> None:
+        """丢弃活动录制并恢复所有界面和监听状态。"""
+
+        self._record_ready = False
+        self.input_capture.stop()
+        self._reset_recording_ui()
+
+    def _reset_recording_ui(self) -> None:
+        """清空录制状态并恢复控件、倒计时和悬浮条。"""
+
+        self.recording_session = None
+        self.recording_settings = None
+        self._record_waiting_for_foreground = False
+        self._record_ready = False
+        self._record_paused = False
+        self.countdown_overlay.cancel()
+        self.recording_overlay.hide()
+        self.profile_combo.setEnabled(True)
+        self.header_record_button.setText("● 录制")
+        self.page_record_button.setText("录制演奏")
+
+    @Slot()
     def toggle_playback(self) -> None:
         """根据当前状态开始、暂停或继续当前曲谱。"""
+
+        if self.recording_session is not None:
+            self.statusBar().showMessage(
+                f"请先按 {self.app_settings.record_hotkey} 完成当前录制"
+            )
+            return
 
         if self.player.state is PlaybackState.PLAYING:
             self.player.pause()
@@ -760,7 +1422,9 @@ class MainWindow(QMainWindow):
             if self.target_hwnd and is_foreground(self.target_hwnd):
                 self.player.play()
             else:
-                self.statusBar().showMessage("请切回开始播放时的窗口，再按 F9 继续")
+                self.statusBar().showMessage(
+                    f"请切回开始播放时的窗口，再按 {self.app_settings.play_hotkey} 继续"
+                )
             return
         if self._waiting_for_foreground:
             return
@@ -780,12 +1444,19 @@ class MainWindow(QMainWindow):
             self._remember_foreground_and_countdown(current)
         else:
             self._waiting_for_foreground = True
-            self.countdown_overlay.show_waiting(self.plan.title)
+            self.countdown_overlay.show_waiting(
+                self.plan.title,
+                self.app_settings.show_countdown_overlay,
+            )
             self.statusBar().showMessage("请切换到游戏窗口")
 
     @Slot()
     def emergency_stop(self) -> None:
         """取消等待或倒计时，停止播放并释放全部按键。"""
+
+        if self.recording_session is not None:
+            self._finish_recording()
+            return
 
         self._waiting_for_foreground = False
         self.countdown_overlay.cancel()
@@ -797,7 +1468,7 @@ class MainWindow(QMainWindow):
 
     def _remember_foreground_and_countdown(self, hwnd: int) -> None:
         """
-        记住按下 F9 时的前台窗口并开始倒计时。
+        记住触发播放快捷键时的前台窗口并开始倒计时。
 
         Args:
             hwnd (int): 当时的前台窗口句柄。
@@ -808,7 +1479,12 @@ class MainWindow(QMainWindow):
         self._waiting_for_foreground = False
         self.target_hwnd = hwnd
         self.statusBar().showMessage("前台保护已启用，正在准备播放")
-        self.countdown_overlay.start_countdown(self.plan.title, self._begin_after_countdown)
+        self.countdown_overlay.start_countdown(
+            self.plan.title,
+            self._begin_after_countdown,
+            self.app_settings.countdown_seconds,
+            self.app_settings.show_countdown_overlay,
+        )
 
     def _begin_after_countdown(self) -> None:
         """倒计时结束后再次验证前台窗口并开始播放。"""
@@ -817,15 +1493,46 @@ class MainWindow(QMainWindow):
             return
         if not is_foreground(self.target_hwnd):
             self._waiting_for_foreground = True
-            self.countdown_overlay.show_waiting(self.plan.title)
+            self.countdown_overlay.show_waiting(
+                self.plan.title,
+                self.app_settings.show_countdown_overlay,
+            )
             return
         self.current_note_text = "等待第一个音符"
-        self.playback_overlay.begin(self.plan.title, self.plan.bpm)
+        if self.app_settings.show_playback_overlay:
+            self.playback_overlay.begin(self.plan.title, self.plan.bpm)
+        else:
+            self.playback_overlay.hide()
         self.now_playing.setText(self.plan.title)
         self.player.play()
 
     def _check_foreground(self) -> None:
         """检测等待中的前台窗口或播放时的焦点变化。"""
+
+        if self.recording_session is not None:
+            current = foreground_window()
+            if self._record_waiting_for_foreground:
+                if current and current != int(self.winId()):
+                    self._record_waiting_for_foreground = False
+                    self.target_hwnd = current
+                    self.statusBar().showMessage("已识别游戏窗口，正在准备录制")
+                    self.countdown_overlay.start_recording_countdown(
+                        self._begin_recording_after_countdown,
+                        self.app_settings.countdown_seconds,
+                        self.app_settings.show_countdown_overlay,
+                    )
+                return
+            if self._record_ready and self.target_hwnd:
+                now_ms = time.perf_counter_ns() / 1_000_000.0
+                if not is_foreground(self.target_hwnd) and not self._record_paused:
+                    self.recording_session.pause(now_ms)
+                    self._record_paused = True
+                    self.statusBar().showMessage("游戏失去焦点，录制已暂停")
+                elif is_foreground(self.target_hwnd) and self._record_paused:
+                    self.recording_session.resume(now_ms)
+                    self._record_paused = False
+                    self.statusBar().showMessage("已返回游戏，录制继续")
+            return
 
         if self._waiting_for_foreground and self.plan is not None:
             current = foreground_window()
@@ -838,6 +1545,18 @@ class MainWindow(QMainWindow):
 
     def _refresh_progress(self) -> None:
         """刷新主窗口和悬浮条中的播放进度。"""
+
+        if self.recording_session is not None and self._record_ready:
+            elapsed_ms = self.recording_session.elapsed_ms(
+                time.perf_counter_ns() / 1_000_000.0
+            )
+            self.recording_overlay.update_recording(
+                elapsed_ms,
+                self.recording_session.note_count,
+                self.current_note_text,
+                self._record_paused,
+            )
+            return
 
         if self.plan is None or self.plan.duration_ms <= 0:
             return
@@ -970,7 +1689,13 @@ class MainWindow(QMainWindow):
             return
         if event.note is None or event.action is not ActionType.PRESS:
             return
-        octave_text = {Octave.LOW: "低音", Octave.MIDDLE: "中音", Octave.HIGH: "高音"}
+        octave_text = {
+            Octave.LOWEST: "倍低音",
+            Octave.LOW: "低音",
+            Octave.MIDDLE: "中音",
+            Octave.HIGH: "高音",
+            Octave.HIGHEST: "倍高音",
+        }
         self.current_note_text = f"{octave_text[event.note.octave]} {event.note.degree}"
 
     def _on_playback_error(self, message: str) -> None:
@@ -995,7 +1720,9 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self.hotkeys.stop()
+        self.input_capture.stop()
         self.countdown_overlay.cancel()
         self.playback_overlay.hide()
+        self.recording_overlay.hide()
         self.player.stop(wait=True)
         event.accept()

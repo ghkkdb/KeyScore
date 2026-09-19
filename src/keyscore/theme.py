@@ -67,6 +67,17 @@ QSplitter::handle { background: #D9E1EA; width: 1px; }
 QWidget#topBar { background: #FFFFFF; border-bottom: 1px solid #DDE4EC; }
 QWidget#sidebar { background: #FFFFFF; border-right: 1px solid #DDE4EC; }
 QWidget#pageCard { background: #FFFFFF; border: 1px solid #DCE4EE; border-radius: 9px; }
+QWidget#settingsSection { background: #F8FAFD; border: 1px solid #DCE4EE; border-radius: 8px; }
+QListWidget#settingsCategories {
+    background: #F7F9FC; border: none; border-right: 1px solid #DCE4EE;
+    border-radius: 8px 0 0 8px; padding: 10px;
+}
+QListWidget#settingsCategories::item { padding: 10px 12px; border-radius: 6px; }
+QListWidget#settingsCategories::item:selected { background: #DCEBFC; color: #0B5FC7; font-weight: 600; }
+QLabel#shortcutKey {
+    background: #FFFFFF; border: 1px solid #C9D3DF; border-radius: 5px;
+    padding: 5px 12px; color: #26354D; font-family: "Cascadia Mono", "Consolas";
+}
 QPushButton#navigation { background: transparent; border: none; text-align: left; padding: 10px 12px; }
 QPushButton#navigation:hover { background: #EDF4FC; }
 QPushButton#navigation[active="true"] { background: #DCEBFC; color: #0B5FC7; font-weight: 600; }
@@ -136,6 +147,19 @@ QSplitter::handle { background: #17315E; width: 1px; }
 QWidget#topBar { background: #091126; border-bottom: 1px solid #17315E; }
 QWidget#sidebar { background: #091126; border-right: 1px solid #17315E; }
 QWidget#pageCard { background: #0A1224; border: 1px solid #183B72; border-radius: 5px; }
+QWidget#settingsSection { background: #0C162B; border: 1px solid #183B72; border-radius: 5px; }
+QListWidget#settingsCategories {
+    background: #091126; border: none; border-right: 1px solid #17315E;
+    border-radius: 4px 0 0 4px; padding: 10px;
+}
+QListWidget#settingsCategories::item { padding: 10px 12px; border-radius: 4px; }
+QListWidget#settingsCategories::item:selected {
+    background: #44207B; color: #FFFFFF; border-left: 2px solid #00D9FF; font-weight: 600;
+}
+QLabel#shortcutKey {
+    background: #0B1429; border: 1px solid #25477C; border-radius: 4px;
+    padding: 5px 12px; color: #8EF2FF; font-family: "Cascadia Mono", "Consolas";
+}
 QPushButton#navigation { background: transparent; border: none; text-align: left; padding: 10px 12px; }
 QPushButton#navigation:hover { background: #101F3D; }
 QPushButton#navigation[active="true"] { background: #44207B; color: #FFFFFF; border-left: 2px solid #00D9FF; font-weight: 600; }

@@ -7,6 +7,8 @@ import unittest
 from keyscore.compiler import PlanCompileError, compile_score
 from keyscore.models import (
     ActionType,
+    Binding,
+    BindingKind,
     MappingMode,
     NoteOutputMode,
     default_profile,
@@ -174,6 +176,34 @@ class CompilerTests(unittest.TestCase):
         profile = default_profile()
         profile.mapping_mode = MappingMode.ROW_OCTAVE
         profile.direct_note_bindings[note_binding_key(score.notes[0])] = profile.note_bindings[1]
+        with self.assertRaisesRegex(PlanCompileError, "不支持半音"):
+            compile_score(score, profile)
+
+    def test_five_row_octave_mapping_uses_outer_octaves(self) -> None:
+        """五行音区模式应通过直接绑定播放倍低音和倍高音。"""
+
+        score = parse_score("LL1 HH7")
+        profile = default_profile()
+        profile.mapping_mode = MappingMode.FIVE_ROW_OCTAVE
+        profile.direct_note_bindings[note_binding_key(score.notes[0])] = Binding(
+            BindingKind.KEYBOARD, 0x10, "Q"
+        )
+        profile.direct_note_bindings[note_binding_key(score.notes[1])] = Binding(
+            BindingKind.KEYBOARD, 0x11, "W"
+        )
+        plan = compile_score(score, profile)
+        presses = [event for event in plan.events if event.action is ActionType.PRESS]
+        self.assertEqual([event.binding.code for event in presses], [0x10, 0x11])
+
+    def test_five_row_octave_mapping_rejects_semitone(self) -> None:
+        """五行音区模式与三行模式一致，不应读取半音绑定。"""
+
+        score = parse_score("#HH1")
+        profile = default_profile()
+        profile.mapping_mode = MappingMode.FIVE_ROW_OCTAVE
+        profile.direct_note_bindings[note_binding_key(score.notes[0])] = Binding(
+            BindingKind.KEYBOARD, 0x10, "Q"
+        )
         with self.assertRaisesRegex(PlanCompileError, "不支持半音"):
             compile_score(score, profile)
 

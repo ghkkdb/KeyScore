@@ -41,6 +41,15 @@ class ScoreEditingTests(unittest.TestCase):
         result = set_total_duration(source, position, position, "0.5")
         self.assertEqual(result.text, "(1 H2:0.5 3)")
 
+    def test_sets_duration_on_outer_octave_notes(self) -> None:
+        """倍低音和倍高音词元应支持总时值快捷编辑。"""
+
+        source = "LL1 HH7:2"
+        low = set_total_duration(source, 1, 1, "0.5")
+        high_position = low.text.index("HH7")
+        high = set_total_duration(low.text, high_position, high_position, "1")
+        self.assertEqual(high.text, "LL1:0.5 HH7")
+
     def test_selection_updates_complete_tokens(self) -> None:
         """选择区域内的完整可编辑词元应批量更新。"""
 

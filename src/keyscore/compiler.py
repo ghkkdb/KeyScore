@@ -70,8 +70,11 @@ def _append_note_events(
     if profile.mapping_mode is MappingMode.DEGREE_MODIFIER:
         binding = profile.note_bindings.get(note.degree)
     else:
-        if profile.mapping_mode is MappingMode.ROW_OCTAVE and note.is_semitone:
-            raise PlanCompileError("三行音区直接映射不支持半音；请改用直接音符映射")
+        if profile.mapping_mode in {
+            MappingMode.ROW_OCTAVE,
+            MappingMode.FIVE_ROW_OCTAVE,
+        } and note.is_semitone:
+            raise PlanCompileError("音区行直接映射不支持半音；请改用直接音符映射")
         binding = profile.direct_note_bindings.get(note_binding_key(note))
     if binding is None:
         raise PlanCompileError(f"音符 {note.octave.value} {note.degree} 没有配置按键")

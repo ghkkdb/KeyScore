@@ -10,9 +10,11 @@ from fractions import Fraction
 class Octave(str, Enum):
     """表示简谱音区。"""
 
+    LOWEST = "lowest"
     LOW = "low"
     MIDDLE = "middle"
     HIGH = "high"
+    HIGHEST = "highest"
 
 
 class ZoneMode(str, Enum):
@@ -28,6 +30,7 @@ class MappingMode(str, Enum):
     DEGREE_MODIFIER = "degree_modifier"
     DIRECT_NOTE = "direct_note"
     ROW_OCTAVE = "row_octave"
+    FIVE_ROW_OCTAVE = "five_row_octave"
 
 
 class NoteOutputMode(str, Enum):

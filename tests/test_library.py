@@ -104,6 +104,28 @@ class LibraryTests(unittest.TestCase):
             self.assertEqual(restored.direct_note_bindings, profile.direct_note_bindings)
             self.assertEqual(list_profile_paths(root), [path])
 
+    def test_five_row_profile_round_trip_keeps_outer_octaves(self) -> None:
+        """五行模式及倍低、倍高音绑定应完整持久化。"""
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "五行.ksprofile.json"
+            profile = default_profile()
+            profile.mapping_mode = MappingMode.FIVE_ROW_OCTAVE
+            profile.direct_note_bindings["lowest:0:1"] = Binding(
+                BindingKind.KEYBOARD, 0x10, "Q"
+            )
+            profile.direct_note_bindings["highest:0:7"] = Binding(
+                BindingKind.KEYBOARD, 0x11, "W"
+            )
+            save_profile(profile, path)
+            restored = load_profile(path)
+            self.assertEqual(restored.mapping_mode, MappingMode.FIVE_ROW_OCTAVE)
+            self.assertEqual(
+                restored.direct_note_bindings,
+                profile.direct_note_bindings,
+            )
+            self.assertIn('"version": 4', path.read_text(encoding="utf-8"))
+
     def test_legacy_profile_defaults_to_tap_output(self) -> None:
         """缺少输出方式字段的旧 Profile 应保持原有短按行为。"""
 

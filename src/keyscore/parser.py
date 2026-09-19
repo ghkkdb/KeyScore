@@ -13,7 +13,7 @@ _TOKEN_PATTERN = re.compile(
     r"\[[^\]]+\](?::\d+(?:\.\d+)?)?|\(|\)|[^\s|()]+|\|"
 )
 _NOTE_PATTERN = re.compile(
-    r"^(?P<sharp>#?)(?P<octave>[LH]?)(?P<degree>[0-7])(?::(?P<duration>\d+(?:\.\d+)?))?$"
+    r"^(?P<sharp>#?)(?P<octave>LL|HH|L|H)?(?P<degree>[0-7])(?::(?P<duration>\d+(?:\.\d+)?))?$"
 )
 _CHORD_PATTERN = re.compile(r"^\[(?P<body>[^\]]+)\](?::(?P<duration>\d+(?:\.\d+)?))?$")
 
@@ -74,13 +74,18 @@ def _octave_from_prefix(prefix: str) -> Octave:
     将音区前缀转换为枚举。
 
     Args:
-        prefix (str): `L`、`H` 或空字符串。
+        prefix (str): `LL`、`L`、`H`、`HH` 或空字符串。
 
     Returns:
         Octave: 对应音区。
     """
 
-    return {"L": Octave.LOW, "H": Octave.HIGH}.get(prefix, Octave.MIDDLE)
+    return {
+        "LL": Octave.LOWEST,
+        "L": Octave.LOW,
+        "H": Octave.HIGH,
+        "HH": Octave.HIGHEST,
+    }.get(prefix, Octave.MIDDLE)
 
 
 def _parse_single(token: str, line: int, allow_rest: bool = True) -> _ParsedToken:

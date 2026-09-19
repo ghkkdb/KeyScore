@@ -9,9 +9,9 @@ from dataclasses import dataclass
 _TOKEN_PATTERN = re.compile(
     r"\[[^\]]+\](?::\d+(?:\.\d+)?)?|\(|\)|[^\s|()]+|\|"
 )
-_NOTE_PATTERN = re.compile(r"#?[LH]?[0-7](?::\d+(?:\.\d+)?)?")
+_NOTE_PATTERN = re.compile(r"#?(?:LL|HH|L|H)?[0-7](?::\d+(?:\.\d+)?)?")
 _CHORD_PATTERN = re.compile(r"\[(?P<body>[^\]]+)\](?::\d+(?:\.\d+)?)?")
-_CHORD_NOTE_PATTERN = re.compile(r"#?[LH]?[1-7]")
+_CHORD_NOTE_PATTERN = re.compile(r"#?(?:LL|HH|L|H)?[1-7]")
 _DURATION_PATTERN = re.compile(r"\d+(?:\.\d+)?")
 _DURATION_SUFFIX_PATTERN = re.compile(r":\d+(?:\.\d+)?$")
 

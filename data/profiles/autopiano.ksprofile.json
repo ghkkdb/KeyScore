@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "name": "autopiano",
   "mapping_mode": "row_octave",
   "note_output_mode": "hold",
@@ -76,128 +76,128 @@
   "direct_notes": {
     "low:0:1": {
       "kind": "keyboard",
-      "code": 9,
-      "label": "8",
-      "extended": false
-    },
-    "low:0:2": {
-      "kind": "keyboard",
-      "code": 10,
-      "label": "9",
-      "extended": false
-    },
-    "low:0:3": {
-      "kind": "keyboard",
-      "code": 11,
-      "label": "0",
-      "extended": false
-    },
-    "low:0:4": {
-      "kind": "keyboard",
-      "code": 16,
-      "label": "Q",
-      "extended": false
-    },
-    "low:0:5": {
-      "kind": "keyboard",
-      "code": 17,
-      "label": "W",
-      "extended": false
-    },
-    "low:0:6": {
-      "kind": "keyboard",
-      "code": 18,
-      "label": "E",
-      "extended": false
-    },
-    "low:0:7": {
-      "kind": "keyboard",
-      "code": 19,
-      "label": "R",
-      "extended": false
-    },
-    "middle:0:1": {
-      "kind": "keyboard",
-      "code": 20,
-      "label": "T",
-      "extended": false
-    },
-    "middle:0:2": {
-      "kind": "keyboard",
-      "code": 21,
-      "label": "Y",
-      "extended": false
-    },
-    "middle:0:3": {
-      "kind": "keyboard",
-      "code": 22,
-      "label": "U",
-      "extended": false
-    },
-    "middle:0:4": {
-      "kind": "keyboard",
-      "code": 23,
-      "label": "I",
-      "extended": false
-    },
-    "middle:0:5": {
-      "kind": "keyboard",
-      "code": 24,
-      "label": "O",
-      "extended": false
-    },
-    "middle:0:6": {
-      "kind": "keyboard",
-      "code": 25,
-      "label": "P",
-      "extended": false
-    },
-    "middle:0:7": {
-      "kind": "keyboard",
       "code": 30,
       "label": "A",
       "extended": false
     },
-    "high:0:1": {
+    "low:0:2": {
       "kind": "keyboard",
       "code": 31,
       "label": "S",
       "extended": false
     },
-    "high:0:2": {
+    "low:0:3": {
       "kind": "keyboard",
       "code": 32,
       "label": "D",
       "extended": false
     },
-    "high:0:3": {
+    "low:0:4": {
       "kind": "keyboard",
       "code": 33,
       "label": "F",
       "extended": false
     },
-    "high:0:4": {
+    "low:0:5": {
       "kind": "keyboard",
       "code": 34,
       "label": "G",
       "extended": false
     },
-    "high:0:5": {
+    "low:0:6": {
       "kind": "keyboard",
       "code": 35,
       "label": "H",
       "extended": false
     },
-    "high:0:6": {
+    "low:0:7": {
       "kind": "keyboard",
       "code": 36,
       "label": "J",
       "extended": false
     },
+    "middle:0:1": {
+      "kind": "keyboard",
+      "code": 16,
+      "label": "Q",
+      "extended": false
+    },
+    "middle:0:2": {
+      "kind": "keyboard",
+      "code": 17,
+      "label": "W",
+      "extended": false
+    },
+    "middle:0:3": {
+      "kind": "keyboard",
+      "code": 18,
+      "label": "E",
+      "extended": false
+    },
+    "middle:0:4": {
+      "kind": "keyboard",
+      "code": 19,
+      "label": "R",
+      "extended": false
+    },
+    "middle:0:5": {
+      "kind": "keyboard",
+      "code": 20,
+      "label": "T",
+      "extended": false
+    },
+    "middle:0:6": {
+      "kind": "keyboard",
+      "code": 21,
+      "label": "Y",
+      "extended": false
+    },
+    "middle:0:7": {
+      "kind": "keyboard",
+      "code": 22,
+      "label": "U",
+      "extended": false
+    },
+    "high:0:1": {
+      "kind": "keyboard",
+      "code": 2,
+      "label": "1",
+      "extended": false
+    },
+    "high:0:2": {
+      "kind": "keyboard",
+      "code": 3,
+      "label": "2",
+      "extended": false
+    },
+    "high:0:3": {
+      "kind": "keyboard",
+      "code": 4,
+      "label": "3",
+      "extended": false
+    },
+    "high:0:4": {
+      "kind": "keyboard",
+      "code": 5,
+      "label": "4",
+      "extended": false
+    },
+    "high:0:5": {
+      "kind": "keyboard",
+      "code": 6,
+      "label": "5",
+      "extended": false
+    },
+    "high:0:6": {
+      "kind": "keyboard",
+      "code": 7,
+      "label": "6",
+      "extended": false
+    },
     "high:0:7": {
       "kind": "keyboard",
-      "code": 37,
-      "label": "K",
+      "code": 8,
+      "label": "7",
       "extended": false
     }
   },

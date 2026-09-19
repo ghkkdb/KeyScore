@@ -115,8 +115,9 @@ class ProfileMappingPage(QWidget):
         self.mode_combo = QComboBox()
         for mode, label in (
             (MappingMode.DEGREE_MODIFIER, "音级 + 按住修饰键"),
-            (MappingMode.DIRECT_NOTE, "每个音符直接映射"),
             (MappingMode.ROW_OCTAVE, "三行音区直接映射"),
+            (MappingMode.FIVE_ROW_OCTAVE, "五行音区直接映射"),
+            (MappingMode.DIRECT_NOTE, "每个音符直接映射"),
         ):
             self.mode_combo.addItem(label, mode.value)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
@@ -347,16 +348,32 @@ class ProfileMappingPage(QWidget):
                     (Octave.HIGH, "高音"),
                 )
             )
+        elif draft.mapping_mode is MappingMode.FIVE_ROW_OCTAVE:
+            self.mapping_hint.setText(
+                "倍低、低、中、高、倍高五个音区各一行，每行按 1～7 直接映射，不使用半音行。"
+            )
+            rows = tuple(
+                (octave, octave_label, False, "")
+                for octave, octave_label in (
+                    (Octave.LOWEST, "倍低音"),
+                    (Octave.LOW, "低音"),
+                    (Octave.MIDDLE, "中音"),
+                    (Octave.HIGH, "高音"),
+                    (Octave.HIGHEST, "倍高音"),
+                )
+            )
         else:
             self.mapping_hint.setText(
-                "低、中、高音的自然音与半音分别成行，每个音符可独立绑定。"
+                "五个音区的自然音与半音分别成行，每个音符可独立绑定。"
             )
             rows = tuple(
                 (octave, f"{prefix}{octave_label}音", is_semitone, prefix)
                 for octave, octave_label in (
+                    (Octave.LOWEST, "倍低"),
                     (Octave.LOW, "低"),
                     (Octave.MIDDLE, "中"),
                     (Octave.HIGH, "高"),
+                    (Octave.HIGHEST, "倍高"),
                 )
                 for is_semitone, prefix in ((False, ""), (True, "#"))
             )

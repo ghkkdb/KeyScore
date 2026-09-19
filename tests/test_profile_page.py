@@ -12,7 +12,7 @@ from keyscore.profile_page import ProfileMappingPage
 
 
 class ProfileMappingPageTests(TestCase):
-    """验证 Profile 页面在三种映射模式下保持可编辑。"""
+    """验证 Profile 页面在全部映射模式下保持可编辑。"""
 
     application: QApplication
 
@@ -23,7 +23,7 @@ class ProfileMappingPageTests(TestCase):
         cls.application = QApplication.instance() or QApplication([])
 
     def test_load_profile_and_switch_all_mapping_modes(self) -> None:
-        """加载 Profile 后三种映射布局均可重建。"""
+        """加载 Profile 后全部映射布局均可重建。"""
 
         page = ProfileMappingPage()
         page.load_profile(default_profile())
@@ -50,3 +50,17 @@ class ProfileMappingPageTests(TestCase):
         self.assertTrue(page.has_unsaved_changes)
         self.assertEqual(len(captured), 1)
         self.assertEqual(captured[0][1], "新的方案")
+
+    def test_five_row_mode_builds_exactly_five_note_rows(self) -> None:
+        """五行音区模式应显示五个行标题和三十五个绑定按钮。"""
+
+        page = ProfileMappingPage()
+        page.load_profile(default_profile())
+        page.mode_combo.setCurrentIndex(
+            page.mode_combo.findData(MappingMode.FIVE_ROW_OCTAVE.value)
+        )
+        grid = page.mapping_layout.itemAt(0).layout()
+        self.assertIsNotNone(grid)
+        assert grid is not None
+        self.assertEqual(grid.count(), 47)
+        self.assertIn("倍低", page.mapping_hint.text())

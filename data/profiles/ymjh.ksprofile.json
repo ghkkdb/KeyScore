@@ -1,55 +1,55 @@
 {
   "version": 3,
-  "name": "三角洲",
-  "mapping_mode": "degree_modifier",
-  "note_output_mode": "hold",
+  "name": "ymjh",
+  "mapping_mode": "row_octave",
+  "note_output_mode": "tap",
   "zone_mode": "combination",
   "initial_zone": "middle",
   "key_hold_ms": 50,
-  "key_gap_ms": 6,
+  "key_gap_ms": 10,
   "zone_delay_ms": 35,
   "zone_click_ms": 20,
   "notes": {
     "1": {
       "kind": "keyboard",
-      "code": 44,
-      "label": "Z",
+      "code": 30,
+      "label": "A",
       "extended": false
     },
     "2": {
       "kind": "keyboard",
-      "code": 45,
-      "label": "X",
+      "code": 31,
+      "label": "S",
       "extended": false
     },
     "3": {
       "kind": "keyboard",
-      "code": 46,
-      "label": "C",
+      "code": 32,
+      "label": "D",
       "extended": false
     },
     "4": {
       "kind": "keyboard",
-      "code": 47,
-      "label": "V",
+      "code": 33,
+      "label": "F",
       "extended": false
     },
     "5": {
       "kind": "keyboard",
-      "code": 48,
-      "label": "B",
+      "code": 34,
+      "label": "G",
       "extended": false
     },
     "6": {
       "kind": "keyboard",
-      "code": 49,
-      "label": "N",
+      "code": 35,
+      "label": "H",
       "extended": false
     },
     "7": {
       "kind": "keyboard",
-      "code": 50,
-      "label": "M",
+      "code": 36,
+      "label": "J",
       "extended": false
     }
   },
@@ -76,128 +76,128 @@
   "direct_notes": {
     "low:0:1": {
       "kind": "keyboard",
-      "code": 23,
-      "label": "I",
-      "extended": false
-    },
-    "low:0:2": {
-      "kind": "keyboard",
-      "code": 24,
-      "label": "O",
-      "extended": false
-    },
-    "low:0:3": {
-      "kind": "keyboard",
-      "code": 25,
-      "label": "P",
-      "extended": false
-    },
-    "low:0:4": {
-      "kind": "keyboard",
-      "code": 37,
-      "label": "K",
-      "extended": false
-    },
-    "low:0:5": {
-      "kind": "keyboard",
-      "code": 38,
-      "label": "L",
-      "extended": false
-    },
-    "low:0:6": {
-      "kind": "keyboard",
-      "code": 39,
-      "label": ";",
-      "extended": false
-    },
-    "low:0:7": {
-      "kind": "keyboard",
-      "code": 51,
-      "label": ",",
-      "extended": false
-    },
-    "middle:0:1": {
-      "kind": "keyboard",
       "code": 16,
       "label": "Q",
       "extended": false
     },
-    "middle:0:2": {
+    "low:0:2": {
       "kind": "keyboard",
       "code": 17,
       "label": "W",
       "extended": false
     },
-    "middle:0:3": {
+    "low:0:3": {
       "kind": "keyboard",
       "code": 18,
       "label": "E",
       "extended": false
     },
-    "middle:0:4": {
+    "low:0:4": {
       "kind": "keyboard",
       "code": 19,
       "label": "R",
       "extended": false
     },
-    "middle:0:5": {
+    "low:0:5": {
       "kind": "keyboard",
       "code": 20,
       "label": "T",
       "extended": false
     },
-    "middle:0:6": {
+    "low:0:6": {
       "kind": "keyboard",
       "code": 21,
       "label": "Y",
       "extended": false
     },
-    "middle:0:7": {
+    "low:0:7": {
       "kind": "keyboard",
       "code": 22,
       "label": "U",
       "extended": false
     },
-    "high:0:1": {
+    "middle:0:1": {
       "kind": "keyboard",
       "code": 30,
       "label": "A",
       "extended": false
     },
-    "high:0:2": {
+    "middle:0:2": {
       "kind": "keyboard",
       "code": 31,
       "label": "S",
       "extended": false
     },
-    "high:0:3": {
+    "middle:0:3": {
       "kind": "keyboard",
       "code": 32,
       "label": "D",
       "extended": false
     },
-    "high:0:4": {
+    "middle:0:4": {
       "kind": "keyboard",
       "code": 33,
       "label": "F",
       "extended": false
     },
-    "high:0:5": {
+    "middle:0:5": {
       "kind": "keyboard",
       "code": 34,
       "label": "G",
       "extended": false
     },
-    "high:0:6": {
+    "middle:0:6": {
       "kind": "keyboard",
       "code": 35,
       "label": "H",
       "extended": false
     },
-    "high:0:7": {
+    "middle:0:7": {
       "kind": "keyboard",
       "code": 36,
       "label": "J",
+      "extended": false
+    },
+    "high:0:1": {
+      "kind": "keyboard",
+      "code": 44,
+      "label": "Z",
+      "extended": false
+    },
+    "high:0:2": {
+      "kind": "keyboard",
+      "code": 45,
+      "label": "X",
+      "extended": false
+    },
+    "high:0:3": {
+      "kind": "keyboard",
+      "code": 46,
+      "label": "C",
+      "extended": false
+    },
+    "high:0:4": {
+      "kind": "keyboard",
+      "code": 47,
+      "label": "V",
+      "extended": false
+    },
+    "high:0:5": {
+      "kind": "keyboard",
+      "code": 48,
+      "label": "B",
+      "extended": false
+    },
+    "high:0:6": {
+      "kind": "keyboard",
+      "code": 49,
+      "label": "N",
+      "extended": false
+    },
+    "high:0:7": {
+      "kind": "keyboard",
+      "code": 50,
+      "label": "M",
       "extended": false
     }
   },
