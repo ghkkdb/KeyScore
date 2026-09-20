@@ -450,16 +450,28 @@ class PianoRollEditor(QGraphicsView):
         self._document: ScoreDocument | None = None
         self._grid = Fraction(1, 4)
         self._default_duration = Fraction(1)
+        self._editing_extent_beats = Fraction(16)
         self._follow_playhead = not editable
-        self._pixels_per_beat = 68.0
-        self._row_height = 22.0
+        self._pixels_per_beat = 96.0 if editable else 68.0
+        self._row_height = 26.0 if editable else 22.0
         self._keyboard_width = 64.0
         self._ruler_height = 28.0
         self._playhead_beat = Fraction(0)
         self._playhead_item: QGraphicsLineItem | None = None
+        self._hover_beat: Fraction | None = None
+        self._hover_pitch: RollPitch | None = None
         self._undo_stack = QUndoStack(self)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
+        self._playhead_vertical_animation = QPropertyAnimation(
+            self.verticalScrollBar(),
+            b"value",
+            self,
+        )
+        self._playhead_vertical_animation.setDuration(220)
+        self._playhead_vertical_animation.setEasingCurve(
+            QEasingCurve.Type.InOutCubic
+        )
         self.setViewportUpdateMode(
             QGraphicsView.ViewportUpdateMode.FullViewportUpdate
             if editable
@@ -477,6 +489,8 @@ class PianoRollEditor(QGraphicsView):
             if editable
             else QGraphicsView.DragMode.ScrollHandDrag
         )
+        if editable:
+            self.viewport().setCursor(Qt.CursorShape.CrossCursor)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAlignment(
@@ -532,6 +546,13 @@ class PianoRollEditor(QGraphicsView):
         """
 
         self._document = document
+        if self._editable:
+            self._editing_extent_beats = max(
+                Fraction(16),
+                self._rounded_extent(
+                    document.total_beats if document is not None else Fraction(0)
+                ),
+            )
         if reset_history:
             self._undo_stack.clear()
         self._rebuild_scene()
@@ -553,6 +574,11 @@ class PianoRollEditor(QGraphicsView):
         if grid <= 0:
             raise ValueError("量化网格必须大于 0")
         self._grid = grid
+        if self._editable and self._document is not None:
+            self._editing_extent_beats = max(
+                self._editing_extent_beats,
+                self._rounded_extent(self._document.total_beats),
+            )
         self._rebuild_scene()
 
     def set_default_duration(self, duration: Fraction) -> None:
@@ -570,12 +596,17 @@ class PianoRollEditor(QGraphicsView):
             raise ValueError("默认时值必须大于 0")
         self._default_duration = duration
 
-    def set_playhead_beat(self, beat: Fraction | float) -> None:
+    def set_playhead_beat(
+        self,
+        beat: Fraction | float,
+        follow_view: bool = True,
+    ) -> None:
         """
         移动播放指针。
 
         Args:
             beat (Fraction | float): 从曲谱起点计算的拍数。
+            follow_view (bool): 是否让横向视口自动跟随播放指针。
         """
 
         self._playhead_beat = max(Fraction(0), Fraction(str(beat)))
@@ -588,7 +619,7 @@ class PianoRollEditor(QGraphicsView):
             x,
             self._ruler_height + 60 * self._row_height,
         )
-        if self._follow_playhead and self.isVisible():
+        if follow_view and self._follow_playhead and self.isVisible():
             scroll_bar = self.horizontalScrollBar()
             visible_width = max(1.0, self.viewport().width() - self._keyboard_width)
             target = max(
@@ -604,9 +635,43 @@ class PianoRollEditor(QGraphicsView):
             next_value = target if abs(distance) < 1.0 else current + distance * easing
             scroll_bar.setValue(round(next_value))
 
+    def follow_playhead_pitch(self, pitch: RollPitch) -> None:
+        """
+        纵向滚动到当前演奏音符所在的音高区域。
+
+        Args:
+            pitch (RollPitch): 当前正在演奏的语义音高。
+        """
+
+        if not self._follow_playhead or not self.isVisible():
+            return
+        row = _MAX_PITCH_INDEX - pitch_index(pitch)
+        y = self._ruler_height + (row + 0.5) * self._row_height
+        scroll_bar = self.verticalScrollBar()
+        current = float(scroll_bar.value())
+        viewport_height = max(1.0, float(self.viewport().height()))
+        safe_top = current + viewport_height * 0.28
+        safe_bottom = current + viewport_height * 0.72
+        if safe_top <= y <= safe_bottom:
+            return
+        target = max(
+            0.0,
+            min(
+                float(scroll_bar.maximum()),
+                y - viewport_height * 0.5,
+            ),
+        )
+        if abs(target - current) < 1.0:
+            return
+        self._playhead_vertical_animation.stop()
+        self._playhead_vertical_animation.setStartValue(round(current))
+        self._playhead_vertical_animation.setEndValue(round(target))
+        self._playhead_vertical_animation.start()
+
     def _center_middle_octave(self) -> None:
         """将初始垂直视野定位到中音音区并回到曲谱开头。"""
 
+        self._playhead_vertical_animation.stop()
         middle_index = 29.5
         center_y = (
             self._ruler_height
@@ -712,6 +777,45 @@ class PianoRollEditor(QGraphicsView):
         step = ratio.numerator // ratio.denominator
         return step * self._grid
 
+    def _rounded_extent(self, value: Fraction) -> Fraction:
+        """
+        将编辑画布长度向上对齐到当前网格。
+
+        Args:
+            value (Fraction): 需要容纳的拍数。
+
+        Returns:
+            Fraction: 不小于输入值的整格拍数。
+        """
+
+        if value <= 0:
+            return Fraction(0)
+        ratio = value / self._grid
+        steps = (ratio.numerator + ratio.denominator - 1) // ratio.denominator
+        return steps * self._grid
+
+    def _extend_editing_canvas_if_needed(self, used_end: Fraction) -> None:
+        """
+        尾格被占满时追加三个网格，并把视图向新增区域移动。
+
+        Args:
+            used_end (Fraction): 本次添加音符后的结束拍位。
+        """
+
+        if not self._editable or used_end < self._editing_extent_beats:
+            return
+        self._editing_extent_beats = (
+            max(self._editing_extent_beats, self._rounded_extent(used_end))
+            + self._grid * 3
+        )
+        self._rebuild_scene()
+        QTimer.singleShot(0, self._scroll_to_editing_end)
+
+    def _scroll_to_editing_end(self) -> None:
+        """将横向视口移动到当前编辑画布末端。"""
+
+        self.horizontalScrollBar().setValue(self.horizontalScrollBar().maximum())
+
     def _scene_pitch(self, y: float) -> RollPitch:
         """
         将场景纵坐标换算为规范音高。
@@ -723,7 +827,7 @@ class PianoRollEditor(QGraphicsView):
             RollPitch: 五音区范围内的音高。
         """
 
-        row = round((y - self._ruler_height) / self._row_height)
+        row = floor((y - self._ruler_height) / self._row_height)
         index = max(0, min(_MAX_PITCH_INDEX, _MAX_PITCH_INDEX - row))
         return pitch_from_index(index)
 
@@ -755,6 +859,7 @@ class PianoRollEditor(QGraphicsView):
         max_beat = max(
             16.0,
             float(self._document.total_beats) if self._document is not None else 16.0,
+            float(self._editing_extent_beats) if self._editable else 0.0,
         )
         scene_width = self._keyboard_width + max_beat * self._pixels_per_beat + 80.0
         scene_height = self._ruler_height + 60 * self._row_height
@@ -795,6 +900,7 @@ class PianoRollEditor(QGraphicsView):
         background = QColor("#081328" if dark else "#F8FBFF")
         natural = QColor("#0D1A32" if dark else "#FFFFFF")
         sharp = QColor("#09162B" if dark else "#E8F0F8")
+        hovered_row = QColor(0, 217, 255, 28) if dark else QColor(22, 135, 239, 24)
         grid_color = QColor("#1D365F" if dark else "#DCE7F1")
         strong_grid = QColor("#315A8E" if dark else "#B8CEE2")
         painter.fillRect(rect, background)
@@ -815,6 +921,11 @@ class PianoRollEditor(QGraphicsView):
                 QRectF(rect.left(), y, rect.width(), self._row_height),
                 sharp if pitch.is_semitone else natural,
             )
+            if self._editable and pitch == self._hover_pitch:
+                painter.fillRect(
+                    QRectF(rect.left(), y, rect.width(), self._row_height),
+                    hovered_row,
+                )
             painter.setPen(QPen(grid_color, 0.7))
             painter.drawLine(
                 QPointF(rect.left(), y + self._row_height),
@@ -882,6 +993,8 @@ class PianoRollEditor(QGraphicsView):
         text_color = QColor("#A7C8EA" if dark else "#536A86")
         key_natural = QColor("#10203A" if dark else "#F8FBFF")
         key_sharp = QColor("#091326" if dark else "#DCE8F3")
+        highlighted_key = QColor("#00BDEB" if dark else "#1687EF")
+        highlighted_text = QColor("#061426" if dark else "#FFFFFF")
         keyboard_left = rect.left()
         first_row = max(
             0,
@@ -901,10 +1014,19 @@ class PianoRollEditor(QGraphicsView):
                 self._keyboard_width,
                 self._row_height,
             )
-            painter.fillRect(key_rect, key_sharp if pitch.is_semitone else key_natural)
+            highlighted = self._editable and pitch == self._hover_pitch
+            painter.fillRect(
+                key_rect,
+                highlighted_key
+                if highlighted
+                else (key_sharp if pitch.is_semitone else key_natural),
+            )
             painter.setPen(QPen(border, 0.7))
             painter.drawLine(key_rect.bottomLeft(), key_rect.bottomRight())
-            painter.setPen(text_color)
+            font = painter.font()
+            font.setBold(highlighted)
+            painter.setFont(font)
+            painter.setPen(highlighted_text if highlighted else text_color)
             painter.drawText(
                 key_rect.adjusted(9, 0, -4, 0),
                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
@@ -939,6 +1061,72 @@ class PianoRollEditor(QGraphicsView):
         painter.drawLine(corner.bottomLeft(), corner.bottomRight())
         painter.drawLine(corner.topRight(), corner.bottomRight())
 
+        if self._editable and self._hover_beat is not None and self._hover_pitch is not None:
+            hover_x = self._keyboard_width + float(self._hover_beat) * self._pixels_per_beat
+            hover_y = (
+                self._ruler_height
+                + (_MAX_PITCH_INDEX - pitch_index(self._hover_pitch)) * self._row_height
+            )
+            hover_rect = QRectF(
+                hover_x + 1.0,
+                hover_y + 1.0,
+                max(2.0, float(self._grid) * self._pixels_per_beat - 2.0),
+                self._row_height - 2.0,
+            )
+            hover_rect = hover_rect.intersected(
+                QRectF(
+                    rect.left() + self._keyboard_width,
+                    rect.top() + self._ruler_height,
+                    max(0.0, rect.width() - self._keyboard_width),
+                    max(0.0, rect.height() - self._ruler_height),
+                )
+            )
+            painter.fillRect(
+                hover_rect,
+                QColor(0, 217, 255, 62) if dark else QColor(22, 135, 239, 48),
+            )
+            painter.setPen(QPen(QColor("#00D9FF" if dark else "#1687EF"), 1.5))
+            painter.drawRect(hover_rect)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        """
+        在编辑模式中预览鼠标当前会落入的拍位和音高网格。
+
+        Args:
+            event (QMouseEvent): 鼠标移动事件。
+        """
+
+        if self._editable and event.position().x() >= self._keyboard_width:
+            scene_position = self.mapToScene(event.position().toPoint())
+            if scene_position.y() >= self._ruler_height:
+                self._hover_beat = self._snap(
+                    (scene_position.x() - self._keyboard_width)
+                    / self._pixels_per_beat
+                )
+                self._hover_pitch = self._scene_pitch(scene_position.y())
+            else:
+                self._hover_beat = None
+                self._hover_pitch = None
+            self.viewport().update()
+        elif self._editable:
+            self._hover_beat = None
+            self._hover_pitch = None
+            self.viewport().update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        """
+        鼠标离开卷帘时清除落点预览。
+
+        Args:
+            event (QEvent): 鼠标离开事件。
+        """
+
+        self._hover_beat = None
+        self._hover_pitch = None
+        self.viewport().update()
+        super().leaveEvent(event)
+
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         """
         双击空白网格时添加默认时值音符。
@@ -969,6 +1157,12 @@ class PianoRollEditor(QGraphicsView):
             self.edit_error.emit(str(exc))
             return
         self._push_change(after, "添加音符")
+        added_group = next(
+            group for group in after.groups if group.start_beat == start
+        )
+        self._extend_editing_canvas_if_needed(
+            added_group.start_beat + added_group.duration_beats
+        )
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """

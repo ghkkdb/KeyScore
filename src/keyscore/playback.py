@@ -79,7 +79,7 @@ class TimelinePlayer:
                 return self._paused_position_ms
             if self._state is PlaybackState.PLAYING:
                 return max(0.0, (time.perf_counter() - self._started_at) * 1000.0)
-            return 0.0
+            return self._paused_position_ms
 
     def load(self, plan: PlaybackPlan) -> None:
         """
@@ -96,6 +96,7 @@ class TimelinePlayer:
             if self._state is not PlaybackState.STOPPED:
                 raise RuntimeError("只能在停止状态装载新曲谱")
             self._plan = plan
+            self._paused_position_ms = 0.0
 
     def play(self) -> None:
         """
@@ -173,6 +174,7 @@ class TimelinePlayer:
         if plan is None:
             return
         index = 0
+        completed = False
         try:
             while index < len(plan.events):
                 with self._condition:
@@ -199,14 +201,14 @@ class TimelinePlayer:
                         if self._stop_requested:
                             break
                         self._condition.wait(timeout=min(remaining, 0.02))
+            completed = not self._stop_requested
         except Exception as exc:  # noqa: BLE001 - 工作线程必须保证最终释放按键
             if self._on_error is not None:
                 self._on_error(exc)
         finally:
             self._backend.release_all()
             with self._condition:
+                self._paused_position_ms = plan.duration_ms if completed else 0.0
                 self._stop_requested = False
-                self._paused_position_ms = 0.0
                 self._set_state_locked(PlaybackState.STOPPED)
                 self._thread = None
-

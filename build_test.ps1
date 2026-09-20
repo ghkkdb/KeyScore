@@ -4,6 +4,8 @@ $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pythonPath = Join-Path $projectRoot ".venv64\Scripts\python.exe"
 $outputDirectory = Join-Path $projectRoot "dist\KeyScore-Test"
 $applicationDataDirectory = Join-Path $outputDirectory "data"
+$assetsDirectory = Join-Path $projectRoot "src\keyscore\assets"
+$iconPath = Join-Path $assetsDirectory "KS.ico"
 $originalPath = $env:PATH
 
 if (-not (Test-Path -LiteralPath $pythonPath)) {
@@ -34,8 +36,8 @@ try {
         --windowed `
         --onedir `
         --name "KeyScore-Test" `
-        --icon "src\keyscore\assets\KS.ico" `
-        --add-data "src\keyscore\assets;keyscore\assets" `
+        --icon "$iconPath" `
+        --add-data "$assetsDirectory;keyscore\assets" `
         --specpath "build" `
         --paths "src" `
         --exclude-module "PySide6.QtMultimedia" `

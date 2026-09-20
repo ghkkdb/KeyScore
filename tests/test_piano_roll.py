@@ -10,11 +10,14 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QGraphicsItem, QGraphicsView
 
 from keyscore.editor_window import ScoreEditorWindow
 from keyscore.piano_roll import PianoRollEditor
-from keyscore.score_document import add_note, document_from_text
+from keyscore.score_document import RollPitch, add_note, document_from_text, pitch_index
+from keyscore.models import Octave
 
 
 class PianoRollTests(unittest.TestCase):
@@ -71,11 +74,15 @@ class PianoRollTests(unittest.TestCase):
         """编辑器选择音符时应完整重绘，避免圆角块只剩文字或局部残影。"""
 
         view = PianoRollEditor(editable=True)
+        preview = PianoRollEditor(editable=False)
 
         self.assertEqual(
             view.viewportUpdateMode(),
             QGraphicsView.ViewportUpdateMode.FullViewportUpdate,
         )
+        self.assertEqual(view.viewport().cursor().shape(), Qt.CursorShape.CrossCursor)
+        self.assertGreater(view._pixels_per_beat, preview._pixels_per_beat)
+        self.assertGreater(view._row_height, preview._row_height)
 
     def test_overview_frame_tracks_horizontal_and_vertical_scroll(self) -> None:
         """全局预览中的定位框应随卷帘时间和音阶位置移动。"""
@@ -108,6 +115,61 @@ class PianoRollTests(unittest.TestCase):
         self.assertEqual(view._snap(0.26), Fraction(1, 4))
         self.assertEqual(view._snap(0.49), Fraction(1, 4))
 
+    def test_filled_editing_canvas_appends_three_cells_and_scrolls_right(self) -> None:
+        """占满尾格后应追加三个当前网格，并自动移动到新尾部。"""
+
+        view = PianoRollEditor(editable=True)
+        view.resize(420, 280)
+        view.set_grid(Fraction(1, 4))
+        view.set_score_document(document_from_text(" ".join("1" for _ in range(16))))
+        view.show()
+        self.application.processEvents()
+
+        view._extend_editing_canvas_if_needed(Fraction(16))
+        self.application.processEvents()
+
+        self.assertEqual(view._editing_extent_beats, Fraction(67, 4))
+        self.assertEqual(
+            view.horizontalScrollBar().value(),
+            view.horizontalScrollBar().maximum(),
+        )
+        view.close()
+
+    def test_pitch_hit_testing_uses_the_full_visual_row(self) -> None:
+        """同一音高行的上半部和下半部都必须命中同一个音符。"""
+
+        view = PianoRollEditor(editable=True)
+        row = 20
+        row_top = view._ruler_height + row * view._row_height
+
+        upper_pitch = view._scene_pitch(row_top + 1.0)
+        lower_pitch = view._scene_pitch(row_top + view._row_height - 1.0)
+        next_pitch = view._scene_pitch(row_top + view._row_height + 1.0)
+
+        self.assertEqual(upper_pitch, lower_pitch)
+        self.assertNotEqual(lower_pitch, next_pitch)
+
+    def test_hovered_grid_row_tracks_the_pitch_label_to_highlight(self) -> None:
+        """十字光标移动到音高行时应记录对应的左侧音节标签。"""
+
+        view = PianoRollEditor(editable=True)
+        view.resize(520, 360)
+        view.set_score_document(document_from_text("1 2 3 4"))
+        view.show()
+        self.application.processEvents()
+        expected = RollPitch(Octave.MIDDLE, 4)
+        row = 59 - pitch_index(expected)
+        scene_position = QPointF(
+            view._keyboard_width + view._pixels_per_beat,
+            view._ruler_height + (row + 0.5) * view._row_height,
+        )
+
+        QTest.mouseMove(view.viewport(), view.mapFromScene(scene_position))
+        self.application.processEvents()
+
+        self.assertEqual(view._hover_pitch, expected)
+        view.close()
+
     def test_preview_follows_playhead_and_defaults_to_middle_octave(self) -> None:
         """长曲谱播放时应横向跟随，初始垂直位置应位于中音区。"""
 
@@ -121,6 +183,42 @@ class PianoRollTests(unittest.TestCase):
         view.set_playhead_beat(36)
         self.application.processEvents()
         self.assertGreater(view.horizontalScrollBar().value(), 0)
+        view.close()
+
+    def test_paused_playhead_update_does_not_override_manual_scroll(self) -> None:
+        """暂停后的指针刷新不应把用户拖动的横向滚动条拉回播放位置。"""
+
+        view = PianoRollEditor(editable=False)
+        view.resize(420, 280)
+        view.set_score_document(document_from_text(" ".join("1" for _index in range(48))))
+        view.show()
+        self.application.processEvents()
+
+        view.horizontalScrollBar().setValue(view.horizontalScrollBar().maximum())
+        manual_position = view.horizontalScrollBar().value()
+        view.set_playhead_beat(0, follow_view=False)
+        self.application.processEvents()
+
+        self.assertEqual(view.horizontalScrollBar().value(), manual_position)
+        view.close()
+
+    def test_preview_follows_current_pitch_vertically(self) -> None:
+        """播放音高跨越音区时，预览应同步上下滚动到当前音符。"""
+
+        view = PianoRollEditor(editable=False)
+        view.resize(420, 280)
+        view.set_score_document(document_from_text("1"))
+        view.show()
+        self.application.processEvents()
+
+        view.follow_playhead_pitch(RollPitch(Octave.HIGHEST, 7))
+        QTest.qWait(250)
+        high_position = view.verticalScrollBar().value()
+        view.follow_playhead_pitch(RollPitch(Octave.LOWEST, 1))
+        QTest.qWait(250)
+        low_position = view.verticalScrollBar().value()
+
+        self.assertGreater(low_position, high_position)
         view.close()
 
     def test_roll_change_synchronizes_text_when_opened(self) -> None:

@@ -28,6 +28,7 @@ class PlaybackTests(unittest.TestCase):
             time.sleep(0.005)
         self.assertEqual(player.state, PlaybackState.STOPPED)
         self.assertGreaterEqual(backend.release_count, 1)
+        self.assertAlmostEqual(player.position_ms, plan.duration_ms)
 
     def test_stop_releases_all(self) -> None:
         """紧急停止应立即执行全部释放。"""
@@ -41,6 +42,7 @@ class PlaybackTests(unittest.TestCase):
         player.stop(wait=True)
         self.assertEqual(player.state, PlaybackState.STOPPED)
         self.assertGreaterEqual(backend.release_count, 1)
+        self.assertEqual(player.position_ms, 0.0)
 
 
 if __name__ == "__main__":

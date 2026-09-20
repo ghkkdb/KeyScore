@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 import time
 
-from PySide6.QtCore import QObject, QSize, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import QEvent, QObject, QPoint, QSize, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QColor, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QKeySequenceEdit,
     QMessageBox,
     QPlainTextEdit,
-    QProgressBar,
     QPushButton,
     QSizePolicy,
     QSplitter,
@@ -49,6 +48,7 @@ from .hotkeys import (
 )
 from .input_backend import WindowsSendInputBackend
 from .library import ScoreEntry, ScoreLibrary, default_data_directory
+from .midi_import import import_midi
 from .models import (
     ActionType,
     BindingKind,
@@ -83,7 +83,7 @@ from .recording.input_capture import GlobalInputCapture
 from .recording.models import PhysicalInputEvent, RecordingSettings
 from .recording.session import RecordingSession
 from .recording.transcriber import transcribe_take
-from .score_document import document_from_score
+from .score_document import document_from_score, pitch_from_note, serialize_document
 from .theme import THEME_LABELS, ThemeManager
 from .window_chrome import (
     FramelessMainWindow,
@@ -223,6 +223,7 @@ class MainWindow(FramelessMainWindow):
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
         body_widget.setLayout(body)
+        self.body_widget = body_widget
         sidebar = QWidget(objectName="sidebar")
         sidebar.setFixedWidth(86)
         sidebar_layout = QVBoxLayout(sidebar)
@@ -241,7 +242,6 @@ class MainWindow(FramelessMainWindow):
             button.setIcon(painted_icon(icon))
             button.setIconSize(QSize(28, 28))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-            button.setToolTip(label)
             button.setAccessibleName(label)
             button.setFixedSize(58, 58)
             button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -249,6 +249,7 @@ class MainWindow(FramelessMainWindow):
             button.setChecked(index == 0)
             button.setProperty("active", index == 0)
             button.clicked.connect(lambda _checked=False, page=index: self._switch_page(page))
+            button.installEventFilter(self)
             sidebar_layout.addWidget(button)
             self.navigation_buttons.append(button)
         sidebar_layout.addStretch()
@@ -270,6 +271,9 @@ class MainWindow(FramelessMainWindow):
         self.pages.addWidget(self._build_about_page())
         body.addWidget(sidebar)
         body.addWidget(self.pages, 1)
+        self.navigation_hint = QLabel(body_widget, objectName="navigationHint")
+        self.navigation_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.navigation_hint.hide()
         root.addWidget(body_widget, 1)
         self.app_status_bar = QStatusBar(objectName="appStatusBar")
         self.app_status_bar.setSizeGripEnabled(False)
@@ -294,6 +298,42 @@ class MainWindow(FramelessMainWindow):
         if hasattr(self, "app_status_bar"):
             return self.app_status_bar
         return super().statusBar()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        """
+        为左侧导航图标显示应用内圆角文字提示。
+
+        Args:
+            watched (QObject): 当前接收事件的对象。
+            event (QEvent): Qt 事件。
+
+        Returns:
+            bool: 事件是否已经被处理。
+        """
+
+        if (
+            hasattr(self, "navigation_buttons")
+            and watched in self.navigation_buttons
+            and hasattr(self, "navigation_hint")
+        ):
+            if event.type() is QEvent.Type.Enter:
+                button = watched
+                if isinstance(button, QToolButton):
+                    self.navigation_hint.setText(button.text())
+                    self.navigation_hint.adjustSize()
+                    position = button.mapTo(
+                        self.body_widget,
+                        QPoint(
+                            button.width() + 10,
+                            (button.height() - self.navigation_hint.height()) // 2,
+                        ),
+                    )
+                    self.navigation_hint.move(position)
+                    self.navigation_hint.raise_()
+                    self.navigation_hint.show()
+            elif event.type() is QEvent.Type.Leave:
+                self.navigation_hint.hide()
+        return super().eventFilter(watched, event)
 
     def _sync_window_shell(self, maximized: bool) -> None:
         """
@@ -331,9 +371,9 @@ class MainWindow(FramelessMainWindow):
         self.header_play_button = QPushButton("播放", objectName="primary")
         self.header_play_button.setIcon(painted_icon("play", 24))
         self.header_play_button.clicked.connect(self.toggle_playback)
-        header_stop_button = QPushButton("停止")
-        header_stop_button.setIcon(painted_icon("stop", 24))
-        header_stop_button.clicked.connect(self.emergency_stop)
+        self.header_stop_button = QPushButton("停止")
+        self.header_stop_button.setIcon(painted_icon("stop", 24))
+        self.header_stop_button.clicked.connect(self.emergency_stop)
         next_button = QPushButton("下一首")
         next_button.setIcon(painted_icon("next", 24))
         next_button.clicked.connect(self._next_score)
@@ -350,7 +390,7 @@ class MainWindow(FramelessMainWindow):
         header.addStretch()
         header.addWidget(previous_button)
         header.addWidget(self.header_play_button)
-        header.addWidget(header_stop_button)
+        header.addWidget(self.header_stop_button)
         header.addWidget(next_button)
         header.addWidget(self.header_record_button)
         divider = QLabel("│", objectName="commandDivider")
@@ -375,6 +415,7 @@ class MainWindow(FramelessMainWindow):
         heading_box.addWidget(QLabel("曲谱", objectName="displayTitle"))
         heading_box.addWidget(QLabel("管理、预览、编辑和播放本地曲谱", objectName="muted"))
         import_button = QPushButton("导入")
+        import_button.setToolTip("导入 KeyScore 文本，或从 MIDI 提取主旋律")
         import_button.clicked.connect(self._import_score)
         self.delete_button = QPushButton("删除")
         self.delete_button.clicked.connect(self._delete_current_score)
@@ -457,35 +498,6 @@ class MainWindow(FramelessMainWindow):
         layout.addLayout(title_row)
         layout.addWidget(self.score_meta)
         layout.addWidget(self.preview_tabs, 1)
-        layout.addWidget(self._build_controls())
-        return panel
-
-    def _build_controls(self) -> QWidget:
-        """
-        创建进度、播放和停止控制。
-
-        Returns:
-            QWidget: 底部控制面板。
-        """
-
-        panel = QWidget()
-        layout = QHBoxLayout(panel)
-        layout.setContentsMargins(0, 10, 0, 0)
-        info = QVBoxLayout()
-        self.now_playing = QLabel("尚未播放")
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 1000)
-        self.progress.setTextVisible(False)
-        info.addWidget(self.now_playing)
-        info.addWidget(self.progress)
-        self.play_button = QPushButton("播放", objectName="primary")
-        self.play_button.clicked.connect(self.toggle_playback)
-        self.stop_button = QPushButton("停止")
-        self.stop_button.clicked.connect(self.emergency_stop)
-        layout.addLayout(info, 1)
-        layout.addSpacing(18)
-        layout.addWidget(self.play_button)
-        layout.addWidget(self.stop_button)
         return panel
 
     def _build_settings_page(self) -> QWidget:
@@ -818,8 +830,6 @@ class MainWindow(FramelessMainWindow):
         self.playback_overlay.hide()
         self.plan = None
         self.target_hwnd = 0
-        self.progress.setValue(0)
-        self.now_playing.setText("尚未播放")
 
     def _new_profile(self) -> None:
         """从当前 Profile 复制创建一份独立的个人配置方案。"""
@@ -1111,7 +1121,7 @@ class MainWindow(FramelessMainWindow):
         )
         self.header_play_button.setToolTip(f"播放 / 暂停（{settings.play_hotkey}）")
         self.header_record_button.setToolTip(f"开始 / 完成录制（{settings.record_hotkey}）")
-        self.stop_button.setToolTip(f"紧急停止（{settings.stop_hotkey}）")
+        self.header_stop_button.setToolTip(f"紧急停止（{settings.stop_hotkey}）")
         self.countdown_overlay.set_shortcuts(
             settings.record_hotkey,
             settings.stop_hotkey,
@@ -1513,9 +1523,7 @@ class MainWindow(FramelessMainWindow):
         self.countdown_overlay.cancel()
         self.player.stop()
         self.playback_overlay.hide()
-        self.progress.setValue(0)
-        self.roll_preview.set_playhead_beat(0)
-        self.now_playing.setText("已停止")
+        self.roll_preview.set_playhead_beat(0, follow_view=False)
         self.statusBar().showMessage("已停止并释放所有按键")
 
     def _remember_foreground_and_countdown(self, hwnd: int) -> None:
@@ -1555,7 +1563,6 @@ class MainWindow(FramelessMainWindow):
             self.playback_overlay.begin(self.plan.title, self.plan.bpm)
         else:
             self.playback_overlay.hide()
-        self.now_playing.setText(self.plan.title)
         self.player.play()
 
     def _check_foreground(self) -> None:
@@ -1613,11 +1620,12 @@ class MainWindow(FramelessMainWindow):
         if self.plan is None or self.plan.duration_ms <= 0:
             return
         ratio = min(1.0, self.player.position_ms / self.plan.duration_ms)
-        self.progress.setValue(int(ratio * 1000))
+        state = self.player.state
         self.roll_preview.set_playhead_beat(
-            self.player.position_ms * self.plan.bpm / 60_000.0
+            self.player.position_ms * self.plan.bpm / 60_000.0,
+            follow_view=state is PlaybackState.PLAYING,
         )
-        paused = self.player.state is PlaybackState.PAUSED
+        paused = state is PlaybackState.PAUSED
         if self.playback_overlay.isVisible():
             self.playback_overlay.update_playback(ratio, self.current_note_text, paused)
 
@@ -1633,18 +1641,35 @@ class MainWindow(FramelessMainWindow):
         self._open_editor(entry.path)
 
     def _import_score(self) -> None:
-        """将外部文本曲谱复制到歌单中。"""
+        """导入外部文本曲谱，或从 MIDI 提取单声部主旋律。"""
 
-        filename, _ = QFileDialog.getOpenFileName(self, "导入曲谱", "", "文本简谱 (*.txt)")
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "导入曲谱",
+            "",
+            "支持的曲谱 (*.txt *.mid *.midi);;MIDI 文件 (*.mid *.midi);;文本简谱 (*.txt)",
+        )
         if not filename:
             return
+        source = Path(filename)
         try:
-            entry = self.library.import_score(Path(filename))
+            if source.suffix.lower() in {".mid", ".midi"}:
+                result = import_midi(source)
+                entry = self.library.save_score_text(serialize_document(result.document))
+            else:
+                result = None
+                entry = self.library.import_score(source)
         except (OSError, UnicodeError, ValueError) as exc:
             QMessageBox.warning(self, "导入失败", str(exc))
             return
         self._refresh_library(entry.path)
         self.statusBar().showMessage(f"已导入：{entry.title}")
+        if result is not None:
+            QMessageBox.information(
+                self,
+                "MIDI 主旋律已导入",
+                f"已转换并保存为 KeyScore 曲谱。\n\n{result.report.summary()}",
+            )
 
     def _delete_current_score(self) -> None:
         """在用户确认后删除当前选中的本地曲谱。"""
@@ -1724,13 +1749,10 @@ class MainWindow(FramelessMainWindow):
         state = PlaybackState(value)
         if state is PlaybackState.PLAYING:
             self.header_play_button.setText("暂停")
-            self.play_button.setText("暂停")
         elif state is PlaybackState.PAUSED:
             self.header_play_button.setText("继续")
-            self.play_button.setText("继续")
         elif state is PlaybackState.STOPPED:
             self.header_play_button.setText("播放")
-            self.play_button.setText("播放")
             self.playback_overlay.hide()
 
     def _on_event(self, event: object) -> None:
@@ -1745,6 +1767,7 @@ class MainWindow(FramelessMainWindow):
             return
         if event.note is None or event.action is not ActionType.PRESS:
             return
+        self.roll_preview.follow_playhead_pitch(pitch_from_note(event.note))
         octave_text = {
             Octave.LOWEST: "倍低音",
             Octave.LOW: "低音",

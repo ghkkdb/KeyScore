@@ -49,8 +49,11 @@ class SettingsPageTests(unittest.TestCase):
                     ["曲谱", "按键映射", "设置", "关于"],
                 )
                 self.assertEqual(
-                    [button.toolTip() for button in window.navigation_buttons],
+                    [button.accessibleName() for button in window.navigation_buttons],
                     ["曲谱", "按键映射", "设置", "关于"],
+                )
+                self.assertTrue(
+                    all(not button.toolTip() for button in window.navigation_buttons)
                 )
                 self.assertTrue(
                     bool(window.windowFlags() & Qt.WindowType.FramelessWindowHint)
@@ -61,6 +64,8 @@ class SettingsPageTests(unittest.TestCase):
                 self.assertIsInstance(window.countdown_seconds_spin, SmoothSpinBox)
                 self.assertIsInstance(window.roll_preview, PianoRollEditor)
                 self.assertEqual(window.preview_tabs.count(), 2)
+                self.assertFalse(hasattr(window, "progress"))
+                self.assertFalse(hasattr(window, "play_button"))
                 self.assertFalse(hasattr(window, "more_button"))
                 self.assertEqual(window.minimumWidth(), 890)
                 self.assertEqual(window.delete_button.parent(), window.pages.widget(0))
