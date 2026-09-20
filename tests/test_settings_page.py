@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication, QLabel
 
 from keyscore.app_settings import ThemeId, load_app_settings
 from keyscore.main_window import MainWindow
+from keyscore.piano_roll import PianoRollEditor
 from keyscore.resources import app_icon_path
 from keyscore.theme import ThemeManager
 from keyscore.window_chrome import ProfileSelector, SmoothComboBox, SmoothSpinBox
@@ -58,6 +59,8 @@ class SettingsPageTests(unittest.TestCase):
                 self.assertIsInstance(window.profile_combo, ProfileSelector)
                 self.assertIsInstance(window.theme_combo, SmoothComboBox)
                 self.assertIsInstance(window.countdown_seconds_spin, SmoothSpinBox)
+                self.assertIsInstance(window.roll_preview, PianoRollEditor)
+                self.assertEqual(window.preview_tabs.count(), 2)
                 self.assertFalse(hasattr(window, "more_button"))
                 self.assertEqual(window.minimumWidth(), 890)
                 self.assertEqual(window.delete_button.parent(), window.pages.widget(0))

@@ -114,6 +114,16 @@ QSplitter::handle { background: transparent; width: 14px; }
 QWidget#sidebar { background: rgba(248, 252, 255, 185); border-right: 1px solid rgba(203, 220, 236, 175); }
 QWidget#pageCard { background: rgba(255, 255, 255, 205); border: 1px solid #D7E6F3; border-radius: 18px; }
 QWidget#settingsSection { background: rgba(255, 255, 255, 190); border: 1px solid #D7E6F3; border-radius: 15px; }
+QGraphicsView#pianoRoll { background: #F8FBFF; border: 1px solid #D4E3F1; border-radius: 14px; }
+QTabWidget#previewTabs::pane, QTabWidget#editorTabs::pane { border: none; background: transparent; top: -1px; }
+QTabWidget#previewTabs QTabBar::tab, QTabWidget#editorTabs QTabBar::tab {
+    background: transparent; color: #66758A; border: none; border-radius: 8px;
+    padding: 7px 14px; margin-right: 4px;
+}
+QTabWidget#previewTabs QTabBar::tab:selected, QTabWidget#editorTabs QTabBar::tab:selected {
+    background: #DCEBFC; color: #0875DC; font-weight: 600;
+}
+QTabWidget#previewTabs QTabBar::tab:hover, QTabWidget#editorTabs QTabBar::tab:hover { background: #EAF4FE; }
 QListWidget#settingsCategories {
     background: rgba(242, 248, 254, 190); border: none; border-right: 1px solid #DCE7F1;
     border-radius: 17px 0 0 17px; padding: 10px;
@@ -253,6 +263,16 @@ QSplitter::handle { background: transparent; width: 14px; }
 QWidget#sidebar { background: rgba(9, 17, 38, 190); border-right: 1px solid #17315E; }
 QWidget#pageCard { background: rgba(10, 18, 36, 220); border: 1px solid #183B72; border-radius: 18px; }
 QWidget#settingsSection { background: rgba(12, 22, 43, 220); border: 1px solid #183B72; border-radius: 15px; }
+QGraphicsView#pianoRoll { background: #081328; border: 1px solid #183B72; border-radius: 14px; }
+QTabWidget#previewTabs::pane, QTabWidget#editorTabs::pane { border: none; background: transparent; top: -1px; }
+QTabWidget#previewTabs QTabBar::tab, QTabWidget#editorTabs QTabBar::tab {
+    background: transparent; color: #8093B5; border: none; border-radius: 8px;
+    padding: 7px 14px; margin-right: 4px;
+}
+QTabWidget#previewTabs QTabBar::tab:selected, QTabWidget#editorTabs QTabBar::tab:selected {
+    background: #32205E; color: #73EAFF; font-weight: 600;
+}
+QTabWidget#previewTabs QTabBar::tab:hover, QTabWidget#editorTabs QTabBar::tab:hover { background: #101F3D; }
 QListWidget#settingsCategories {
     background: #091126; border: none; border-right: 1px solid #17315E;
     border-radius: 17px 0 0 17px; padding: 10px;
@@ -291,6 +311,10 @@ QScrollArea > QWidget > QWidget { background: transparent; }
 QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
 QScrollBar::handle:vertical { background: #244B7E; border-radius: 4px; min-height: 28px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar:horizontal { background: transparent; height: 9px; margin: 2px 3px; }
+QScrollBar::handle:horizontal { background: #244B7E; border-radius: 4px; min-width: 30px; }
+QScrollBar::handle:horizontal:hover { background: #34649D; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 QToolTip { background: #101C35; color: #CFF8FF; border: 1px solid #00AEDA; border-radius: 9px; padding: 7px 10px; }
 QFrame#overlayCard { background: rgba(7, 13, 29, 244); border: 1px solid #00BDEB; border-radius: 16px; }
 QFrame#overlayCard QLabel { color: #EAF4FF; }

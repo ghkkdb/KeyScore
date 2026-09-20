@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from fractions import Fraction
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -14,14 +15,18 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from .library import rename_score_file
 from .parser import ScoreParseError, parse_score
+from .piano_roll import PianoRollEditor
+from .score_document import ScoreDocument, document_from_text, serialize_document
 from .score_editing import set_total_duration
 from .theme import set_widget_state
+from .window_chrome import SmoothComboBox
 
 
 class ScoreEditorWindow(QMainWindow):
@@ -40,10 +45,13 @@ class ScoreEditorWindow(QMainWindow):
 
         super().__init__(parent)
         self.path = path
+        self._syncing_views = False
+        self._roll_dirty = False
+        self._text_dirty = False
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowTitle(f"编辑 · {path.stem}")
-        self.resize(780, 620)
-        self.setMinimumSize(600, 460)
+        self.resize(980, 700)
+        self.setMinimumSize(760, 540)
 
         central = QWidget(objectName="editorWindow")
         layout = QVBoxLayout(central)
@@ -52,18 +60,84 @@ class ScoreEditorWindow(QMainWindow):
         header = QHBoxLayout()
         title = QLabel("曲谱编辑")
         title.setObjectName("dialogTitle")
-        syntax = QLabel("# 半音   L 低音   H 高音   ( ) 连音   - 延一拍   --- 段落")
+        syntax = QLabel("双击添加音符，单击选择后可删除；音符不支持拖动")
         syntax.setObjectName("muted")
         header.addWidget(title)
         header.addStretch()
         header.addWidget(syntax)
 
         self.editor = QPlainTextEdit()
-        self.editor.setPlainText(path.read_text(encoding="utf-8"))
+        source_text = path.read_text(encoding="utf-8")
+        self.editor.setPlainText(source_text)
         font = QFont("Cascadia Mono")
         font.setStyleHint(QFont.StyleHint.Monospace)
         self.editor.setFont(font)
-        self.editor.textChanged.connect(self._validate)
+        self.editor.textChanged.connect(self._on_text_changed)
+
+        roll_page = QWidget()
+        roll_layout = QVBoxLayout(roll_page)
+        roll_layout.setContentsMargins(0, 8, 0, 0)
+        roll_layout.setSpacing(10)
+        roll_tools = QHBoxLayout()
+        roll_tools.setSpacing(8)
+        self.undo_button = QPushButton("撤销")
+        self.redo_button = QPushButton("重做")
+        self.undo_button.setToolTip("撤销最近一次添加或删除")
+        self.redo_button.setToolTip("仅在执行撤销后恢复被撤销的操作")
+        self.undo_button.setEnabled(False)
+        self.redo_button.setEnabled(False)
+        delete_button = QPushButton("删除音符")
+        zoom_out_button = QPushButton("缩小")
+        zoom_in_button = QPushButton("放大")
+        self.grid_combo = SmoothComboBox()
+        self.duration_combo = SmoothComboBox()
+        for label, value in (
+            ("1 拍", "1"),
+            ("1/2 拍", "1/2"),
+            ("1/4 拍", "1/4"),
+            ("1/8 拍", "1/8"),
+            ("1/16 拍", "1/16"),
+        ):
+            self.grid_combo.addItem(f"网格 {label}", value)
+        self.grid_combo.setCurrentIndex(2)
+        for label, value in (
+            ("1/4 拍", "1/4"),
+            ("1/2 拍", "1/2"),
+            ("1 拍", "1"),
+            ("2 拍", "2"),
+            ("4 拍", "4"),
+        ):
+            self.duration_combo.addItem(f"新音符 {label}", value)
+        self.duration_combo.setCurrentIndex(2)
+        self.roll_editor = PianoRollEditor(editable=True)
+        self.roll_editor.setMinimumHeight(360)
+        self.roll_editor.document_changed.connect(self._on_roll_document_changed)
+        self.roll_editor.edit_error.connect(self._show_roll_error)
+        self.undo_button.clicked.connect(self.roll_editor.undo_stack.undo)
+        self.redo_button.clicked.connect(self.roll_editor.undo_stack.redo)
+        self.roll_editor.undo_stack.canUndoChanged.connect(self.undo_button.setEnabled)
+        self.roll_editor.undo_stack.canRedoChanged.connect(self.redo_button.setEnabled)
+        delete_button.clicked.connect(self.roll_editor.delete_selected_notes)
+        zoom_out_button.clicked.connect(self.roll_editor.zoom_out)
+        zoom_in_button.clicked.connect(self.roll_editor.zoom_in)
+        self.grid_combo.currentIndexChanged.connect(self._apply_roll_grid)
+        self.duration_combo.currentIndexChanged.connect(self._apply_roll_duration)
+        roll_tools.addWidget(self.undo_button)
+        roll_tools.addWidget(self.redo_button)
+        roll_tools.addWidget(delete_button)
+        roll_tools.addSpacing(10)
+        roll_tools.addWidget(self.grid_combo)
+        roll_tools.addWidget(self.duration_combo)
+        roll_tools.addStretch()
+        roll_tools.addWidget(zoom_out_button)
+        roll_tools.addWidget(zoom_in_button)
+        roll_layout.addLayout(roll_tools)
+        roll_layout.addWidget(self.roll_editor, 1)
+
+        text_page = QWidget()
+        text_layout = QVBoxLayout(text_page)
+        text_layout.setContentsMargins(0, 8, 0, 0)
+        text_layout.setSpacing(10)
 
         duration_bar = QHBoxLayout()
         duration_hint = QLabel("总时值")
@@ -117,14 +191,144 @@ class ScoreEditorWindow(QMainWindow):
         footer.addWidget(self.validation_label)
         footer.addStretch()
         footer.addWidget(save_button)
+        self.editor_tabs = QTabWidget()
+        self.editor_tabs.setObjectName("editorTabs")
+        self.editor_tabs.addTab(roll_page, "钢琴卷帘")
+        self.editor_tabs.addTab(text_page, "曲谱文本")
+        self.editor_tabs.currentChanged.connect(self._on_editor_tab_changed)
+        text_layout.addLayout(duration_bar)
+        text_layout.addLayout(insert_bar)
+        text_layout.addWidget(self.editor, 1)
         layout.addLayout(header)
-        layout.addLayout(duration_bar)
-        layout.addLayout(insert_bar)
-        layout.addWidget(self.editor, 1)
+        layout.addWidget(self.editor_tabs, 1)
         layout.addLayout(footer)
         self.setCentralWidget(central)
+        try:
+            self.roll_editor.set_score_document(document_from_text(source_text))
+        except ScoreParseError:
+            self.editor_tabs.setCurrentWidget(text_page)
+        self._apply_roll_grid()
+        self._apply_roll_duration()
         self._validate()
         self.editor.document().setModified(False)
+
+    def _apply_roll_grid(self, _index: int = -1) -> None:
+        """
+        将工具栏选择的吸附网格应用到卷帘。
+
+        Args:
+            _index (int): 组合框发送的当前索引。
+        """
+
+        value = self.grid_combo.currentData()
+        if value is not None:
+            self.roll_editor.set_grid(Fraction(str(value)))
+
+    def _apply_roll_duration(self, _index: int = -1) -> None:
+        """
+        将工具栏选择的默认时值应用到新建音符。
+
+        Args:
+            _index (int): 组合框发送的当前索引。
+        """
+
+        value = self.duration_combo.currentData()
+        if value is not None:
+            self.roll_editor.set_default_duration(Fraction(str(value)))
+
+    def _on_roll_document_changed(self, value: object) -> None:
+        """
+        标记卷帘修改，文本只在切换页面或保存时同步。
+
+        Args:
+            value (object): 卷帘发送的新文档。
+        """
+
+        if self._syncing_views or not isinstance(value, ScoreDocument):
+            return
+        self._roll_dirty = True
+        self._text_dirty = False
+        self.editor.document().setModified(True)
+        note_count = sum(len(group.pitches) for group in value.groups)
+        self.validation_label.setText(
+            f"卷帘已修改 · {note_count} 个音符 · {float(value.total_beats):g} 拍"
+        )
+        set_widget_state(self.validation_label, "warning")
+
+    def _sync_roll_to_text(self) -> bool:
+        """
+        在需要查看或保存文本时执行一次卷帘序列化。
+
+        Returns:
+            bool: 同步成功或无需同步时为 `True`。
+        """
+
+        if not self._roll_dirty:
+            return True
+        document = self.roll_editor.score_document()
+        if document is None:
+            return False
+        try:
+            text = serialize_document(document)
+        except ValueError as exc:
+            self._show_roll_error(str(exc))
+            return False
+        self._syncing_views = True
+        self.editor.setPlainText(text)
+        self.editor.document().setModified(True)
+        self._syncing_views = False
+        self._roll_dirty = False
+        self._text_dirty = False
+        self._validate()
+        return True
+
+    def _on_text_changed(self) -> None:
+        """标记文本已修改并执行实时语法检查。"""
+
+        if self._syncing_views:
+            return
+        self._text_dirty = True
+        self._roll_dirty = False
+        self._validate()
+
+    def _on_editor_tab_changed(self, index: int) -> None:
+        """
+        切回卷帘时解析文本并阻止无效内容进入图形编辑器。
+
+        Args:
+            index (int): 当前标签页索引。
+        """
+
+        if self._syncing_views:
+            return
+        if index == 1:
+            self._sync_roll_to_text()
+            return
+        if not self._text_dirty:
+            return
+        try:
+            document = document_from_text(self.editor.toPlainText())
+        except ScoreParseError as exc:
+            self.validation_label.setText(str(exc))
+            set_widget_state(self.validation_label, "error")
+            self.editor_tabs.blockSignals(True)
+            self.editor_tabs.setCurrentIndex(1)
+            self.editor_tabs.blockSignals(False)
+            self.editor.setFocus()
+            return
+        self.roll_editor.set_score_document(document)
+        self._text_dirty = False
+
+    def _show_roll_error(self, message: str) -> None:
+        """
+        在编辑器状态栏显示卷帘约束错误。
+
+        Args:
+            message (str): 用户可理解的错误内容。
+        """
+
+        self.validation_label.setText(message)
+        set_widget_state(self.validation_label, "warning")
 
     def _insert_score_token(self, token: str) -> None:
         """
@@ -218,6 +422,10 @@ class ScoreEditorWindow(QMainWindow):
         if result != QMessageBox.StandardButton.Yes:
             return
 
+        if not self._sync_roll_to_text():
+            QMessageBox.warning(self, "无法保存", "卷帘内容无法转换为有效曲谱文本")
+            return
+
         try:
             score = parse_score(self.editor.toPlainText())
         except ScoreParseError as exc:
@@ -230,6 +438,8 @@ class ScoreEditorWindow(QMainWindow):
             QMessageBox.warning(self, "保存失败", str(exc))
             return
         self.editor.document().setModified(False)
+        self._roll_dirty = False
+        self._text_dirty = False
         self.setWindowTitle(f"编辑 · {score.title}")
         self.saved.emit(self.path)
         self.close()

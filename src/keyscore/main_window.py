@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QStatusBar,
+    QTabWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -58,6 +59,7 @@ from .models import (
 )
 from .overlay import CountdownOverlay, PlaybackOverlay, RecordingOverlay
 from .parser import ScoreParseError, parse_score
+from .piano_roll import PianoRollEditor
 from .playback import PlaybackState, TimelinePlayer
 from .profile_page import ProfileMappingPage
 from .profile_store import (
@@ -81,6 +83,7 @@ from .recording.input_capture import GlobalInputCapture
 from .recording.models import PhysicalInputEvent, RecordingSettings
 from .recording.session import RecordingSession
 from .recording.transcriber import transcribe_take
+from .score_document import document_from_score
 from .theme import THEME_LABELS, ThemeManager
 from .window_chrome import (
     FramelessMainWindow,
@@ -120,7 +123,7 @@ class MainWindow(FramelessMainWindow):
 
         super().__init__()
         self.setWindowTitle("KeyScore 键谱")
-        self.resize(890, 760)
+        self.resize(1180, 870)
         self.setMinimumSize(890, 620)
         self.theme_manager = theme_manager
         self.app_settings_path = app_settings_path
@@ -186,7 +189,8 @@ class MainWindow(FramelessMainWindow):
         self.focus_timer.timeout.connect(self._check_foreground)
         self.focus_timer.start()
         self.ui_timer = QTimer(self)
-        self.ui_timer.setInterval(50)
+        self.ui_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self.ui_timer.setInterval(33)
         self.ui_timer.timeout.connect(self._refresh_progress)
         self.ui_timer.start()
         QTimer.singleShot(0, self._start_hotkeys)
@@ -445,9 +449,14 @@ class MainWindow(FramelessMainWindow):
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
         self.preview.setPlaceholderText("从左侧选择曲谱")
+        self.roll_preview = PianoRollEditor(editable=False)
+        self.preview_tabs = QTabWidget()
+        self.preview_tabs.setObjectName("previewTabs")
+        self.preview_tabs.addTab(self.roll_preview, "卷帘")
+        self.preview_tabs.addTab(self.preview, "文本")
         layout.addLayout(title_row)
         layout.addWidget(self.score_meta)
-        layout.addWidget(self.preview, 1)
+        layout.addWidget(self.preview_tabs, 1)
         layout.addWidget(self._build_controls())
         return panel
 
@@ -1210,6 +1219,7 @@ class MainWindow(FramelessMainWindow):
         if current is None:
             self.current_entry = None
             self.preview.clear()
+            self.roll_preview.set_score_document(None)
             self.edit_button.setEnabled(False)
             return
         path = Path(str(current.data(Qt.ItemDataRole.UserRole)))
@@ -1227,6 +1237,8 @@ class MainWindow(FramelessMainWindow):
             self.score_title.setText(current.text())
             self.score_meta.setText(str(exc))
             self.preview.setPlainText(text if "text" in locals() else "")
+            self.roll_preview.set_score_document(None)
+            self.preview_tabs.setCurrentWidget(self.preview)
             self.edit_button.setEnabled(True)
             return
         self.current_entry = ScoreEntry(score.title, path)
@@ -1236,6 +1248,7 @@ class MainWindow(FramelessMainWindow):
             f"{len(score.notes)} 个音符"
         )
         self.preview.setPlainText(text)
+        self.roll_preview.set_score_document(document_from_score(score))
         self.edit_button.setEnabled(True)
 
     @Slot()
@@ -1501,6 +1514,7 @@ class MainWindow(FramelessMainWindow):
         self.player.stop()
         self.playback_overlay.hide()
         self.progress.setValue(0)
+        self.roll_preview.set_playhead_beat(0)
         self.now_playing.setText("已停止")
         self.statusBar().showMessage("已停止并释放所有按键")
 
@@ -1600,6 +1614,9 @@ class MainWindow(FramelessMainWindow):
             return
         ratio = min(1.0, self.player.position_ms / self.plan.duration_ms)
         self.progress.setValue(int(ratio * 1000))
+        self.roll_preview.set_playhead_beat(
+            self.player.position_ms * self.plan.bpm / 60_000.0
+        )
         paused = self.player.state is PlaybackState.PAUSED
         if self.playback_overlay.isVisible():
             self.playback_overlay.update_playback(ratio, self.current_note_text, paused)
@@ -1655,6 +1672,7 @@ class MainWindow(FramelessMainWindow):
         self.score_title.setText("未选择曲谱")
         self.score_meta.setText("")
         self.preview.clear()
+        self.roll_preview.set_score_document(None)
         self.edit_button.setEnabled(False)
         self._refresh_library()
         self.statusBar().showMessage(f"已删除：{entry.title}")
