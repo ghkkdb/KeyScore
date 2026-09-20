@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from keyscore.models import GameProfile, MappingMode, default_profile
 from keyscore.profile_page import ProfileMappingPage
+from keyscore.window_chrome import SmoothComboBox, SmoothSpinBox
 
 
 class ProfileMappingPageTests(TestCase):
@@ -27,6 +28,11 @@ class ProfileMappingPageTests(TestCase):
 
         page = ProfileMappingPage()
         page.load_profile(default_profile())
+
+        self.assertIsInstance(page.mode_combo, SmoothComboBox)
+        self.assertIsInstance(page.output_mode_combo, SmoothComboBox)
+        self.assertIsInstance(page.hold_spin, SmoothSpinBox)
+        self.assertIsInstance(page.gap_spin, SmoothSpinBox)
 
         self.assertFalse(page.has_unsaved_changes)
         for mode in MappingMode:

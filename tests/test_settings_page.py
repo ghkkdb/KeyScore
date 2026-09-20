@@ -10,12 +10,15 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtGui import QKeySequence
+from PySide6.QtGui import QIcon, QKeySequence, QPixmap
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel
 
 from keyscore.app_settings import ThemeId, load_app_settings
 from keyscore.main_window import MainWindow
+from keyscore.resources import app_icon_path
 from keyscore.theme import ThemeManager
+from keyscore.window_chrome import ProfileSelector, SmoothComboBox, SmoothSpinBox
 
 
 class SettingsPageTests(unittest.TestCase):
@@ -44,6 +47,20 @@ class SettingsPageTests(unittest.TestCase):
                     [button.text() for button in window.navigation_buttons],
                     ["曲谱", "按键映射", "设置", "关于"],
                 )
+                self.assertEqual(
+                    [button.toolTip() for button in window.navigation_buttons],
+                    ["曲谱", "按键映射", "设置", "关于"],
+                )
+                self.assertTrue(
+                    bool(window.windowFlags() & Qt.WindowType.FramelessWindowHint)
+                )
+                self.assertEqual(window.navigation_buttons[0].width(), 58)
+                self.assertIsInstance(window.profile_combo, ProfileSelector)
+                self.assertIsInstance(window.theme_combo, SmoothComboBox)
+                self.assertIsInstance(window.countdown_seconds_spin, SmoothSpinBox)
+                self.assertFalse(hasattr(window, "more_button"))
+                self.assertEqual(window.minimumWidth(), 890)
+                self.assertEqual(window.delete_button.parent(), window.pages.widget(0))
                 self.assertEqual(window.settings_stack.count(), 2)
                 self.assertEqual(
                     [
@@ -59,8 +76,23 @@ class SettingsPageTests(unittest.TestCase):
                 self.assertTrue(window.playback_overlay_check.isChecked())
                 self.assertEqual(window.countdown_seconds_spin.value(), 3)
                 self.assertTrue(window.countdown_overlay_check.isChecked())
+                self.assertGreaterEqual(window.record_hotkey_edit.minimumWidth(), 200)
+                labels = [label.text() for label in window.findChildren(QLabel)]
+                self.assertNotIn("游戏演奏按键", labels)
             finally:
                 window.close()
+
+    def test_app_icon_resource_can_be_loaded(self) -> None:
+        """应用图标应随包发布并能被 Qt 正常读取。"""
+
+        path = app_icon_path()
+        pixmap = QPixmap(str(path))
+        icon = QIcon(str(path))
+
+        self.assertTrue(path.is_file())
+        self.assertFalse(pixmap.isNull())
+        self.assertFalse(icon.isNull())
+        self.assertEqual(pixmap.width(), pixmap.height())
 
     def test_custom_hotkeys_are_saved_and_labels_refresh(self) -> None:
         """保存有效快捷键后应立即持久化并刷新界面提示。"""

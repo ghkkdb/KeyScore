@@ -34,6 +34,8 @@ try {
         --windowed `
         --onedir `
         --name "KeyScore-Test" `
+        --icon "src\keyscore\assets\KS.ico" `
+        --add-data "src\keyscore\assets;keyscore\assets" `
         --specpath "build" `
         --paths "src" `
         --exclude-module "PySide6.QtMultimedia" `

@@ -7,14 +7,14 @@ from dataclasses import replace
 from pathlib import Path
 import time
 
-from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
+from PySide6.QtCore import QObject, QSize, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QCloseEvent, QColor, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QFileDialog,
     QFormLayout,
+    QGraphicsDropShadowEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -22,15 +22,15 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QLineEdit,
     QKeySequenceEdit,
-    QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QSplitter,
-    QSpinBox,
     QStackedWidget,
     QStatusBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -82,6 +82,15 @@ from .recording.models import PhysicalInputEvent, RecordingSettings
 from .recording.session import RecordingSession
 from .recording.transcriber import transcribe_take
 from .theme import THEME_LABELS, ThemeManager
+from .window_chrome import (
+    FramelessMainWindow,
+    ProfileSelector,
+    RoundedShell,
+    SmoothComboBox,
+    SmoothSpinBox,
+    WindowTitleBar,
+    painted_icon,
+)
 
 
 class _UiSignals(QObject):
@@ -97,7 +106,7 @@ class _UiSignals(QObject):
     recording_error = Signal(str)
 
 
-class MainWindow(QMainWindow):
+class MainWindow(FramelessMainWindow):
     """提供曲谱歌单、播放预览、按键映射和前台安全保护。"""
 
     def __init__(self, theme_manager: ThemeManager, app_settings_path: Path) -> None:
@@ -111,8 +120,8 @@ class MainWindow(QMainWindow):
 
         super().__init__()
         self.setWindowTitle("KeyScore 键谱")
-        self.resize(1120, 720)
-        self.setMinimumSize(860, 580)
+        self.resize(890, 760)
+        self.setMinimumSize(890, 620)
         self.theme_manager = theme_manager
         self.app_settings_path = app_settings_path
         self.app_settings = load_app_settings(app_settings_path)
@@ -169,7 +178,7 @@ class MainWindow(QMainWindow):
         )
 
         self._build_ui()
-        self._build_menu()
+        self.maximized_changed.connect(self._sync_window_shell)
         self._refresh_library()
 
         self.focus_timer = QTimer(self)
@@ -185,32 +194,65 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         """创建固定顶部栏、左侧导航和四页工作区。"""
 
-        central = QWidget(objectName="centralPanel")
-        root = QVBoxLayout(central)
+        window_root = QWidget(objectName="windowRoot")
+        self.window_root_layout = QVBoxLayout(window_root)
+        self.window_root_layout.setContentsMargins(12, 12, 12, 12)
+        self.window_root_layout.setSpacing(0)
+
+        self.app_shell = RoundedShell()
+        self.app_shell.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        self.window_shadow = QGraphicsDropShadowEffect(self)
+        self.window_shadow.setBlurRadius(34)
+        self.window_shadow.setOffset(0, 5)
+        self.window_shadow.setColor(QColor(42, 91, 145, 76))
+        self.app_shell.setGraphicsEffect(self.window_shadow)
+        root = QVBoxLayout(self.app_shell)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
+
+        self.title_bar = WindowTitleBar("KeyScore", "用键盘，奏响你的音乐")
+        root.addWidget(self.title_bar)
         root.addWidget(self._build_header())
 
+        body_widget = QWidget(objectName="centralPanel")
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
+        body_widget.setLayout(body)
         sidebar = QWidget(objectName="sidebar")
-        sidebar.setFixedWidth(168)
+        sidebar.setFixedWidth(86)
         sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(12, 18, 12, 14)
-        sidebar_layout.setSpacing(8)
-        self.navigation_buttons: list[QPushButton] = []
-        for index, text in enumerate(("曲谱", "按键映射", "设置", "关于")):
-            button = QPushButton(text, objectName="navigation")
+        sidebar_layout.setContentsMargins(14, 18, 14, 14)
+        sidebar_layout.setSpacing(10)
+        self.navigation_buttons: list[QToolButton] = []
+        navigation_items = (
+            ("music", "曲谱"),
+            ("keyboard", "按键映射"),
+            ("settings", "设置"),
+            ("info", "关于"),
+        )
+        for index, (icon, label) in enumerate(navigation_items):
+            button = QToolButton(objectName="navigation")
+            button.setText(label)
+            button.setIcon(painted_icon(icon))
+            button.setIconSize(QSize(28, 28))
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+            button.setToolTip(label)
+            button.setAccessibleName(label)
+            button.setFixedSize(58, 58)
+            button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            button.setCheckable(True)
+            button.setChecked(index == 0)
             button.setProperty("active", index == 0)
             button.clicked.connect(lambda _checked=False, page=index: self._switch_page(page))
             sidebar_layout.addWidget(button)
             self.navigation_buttons.append(button)
         sidebar_layout.addStretch()
         version = QLabel(
-            f"KeyScore v{__version__}\n用键盘，奏响你的音乐",
-            objectName="muted",
+            f"v{__version__}",
+            objectName="sidebarVersion",
         )
+        version.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sidebar_layout.addWidget(version)
 
         self.pages = QStackedWidget()
@@ -224,15 +266,48 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self._build_about_page())
         body.addWidget(sidebar)
         body.addWidget(self.pages, 1)
-        root.addLayout(body, 1)
-        self.setCentralWidget(central)
-        self.setStatusBar(QStatusBar())
+        root.addWidget(body_widget, 1)
+        self.app_status_bar = QStatusBar(objectName="appStatusBar")
+        self.app_status_bar.setSizeGripEnabled(False)
+        root.addWidget(self.app_status_bar)
+        self.window_root_layout.addWidget(self.app_shell)
+        self.setCentralWidget(window_root)
         self._refresh_hotkey_labels()
         self.statusBar().showMessage(
             f"就绪：{self.app_settings.record_hotkey} 录制游戏演奏，"
             f"{self.app_settings.play_hotkey} 播放当前曲谱"
         )
         self._refresh_profile_combo()
+
+    def statusBar(self) -> QStatusBar:
+        """
+        返回嵌入圆角窗口外壳的状态栏。
+
+        Returns:
+            QStatusBar: 主窗口底部状态栏。
+        """
+
+        if hasattr(self, "app_status_bar"):
+            return self.app_status_bar
+        return super().statusBar()
+
+    def _sync_window_shell(self, maximized: bool) -> None:
+        """
+        根据最大化状态调整外边距、阴影和标题栏按钮。
+
+        Args:
+            maximized (bool): 窗口当前是否已最大化。
+        """
+
+        margin = 0 if maximized else 12
+        self.window_root_layout.setContentsMargins(margin, margin, margin, margin)
+        self.window_shadow.setEnabled(not maximized)
+        self.app_shell.set_corner_radius(0.0 if maximized else 24.0)
+        self.app_shell.setProperty("maximized", maximized)
+        style = self.app_shell.style()
+        style.unpolish(self.app_shell)
+        style.polish(self.app_shell)
+        self.title_bar.update_maximize_state(maximized)
 
     def _build_header(self) -> QWidget:
         """
@@ -242,43 +317,40 @@ class MainWindow(QMainWindow):
             QWidget: 顶部控制栏。
         """
 
-        header_widget = QWidget(objectName="topBar")
+        header_widget = QWidget(objectName="commandBar")
         header = QHBoxLayout(header_widget)
-        header.setContentsMargins(20, 12, 20, 12)
-        header.setSpacing(8)
-        brand = QLabel("KeyScore")
-        brand.setObjectName("brand")
+        header.setContentsMargins(104, 8, 22, 12)
+        header.setSpacing(10)
         previous_button = QPushButton("上一首")
+        previous_button.setIcon(painted_icon("previous", 24))
         previous_button.clicked.connect(self._previous_score)
         self.header_play_button = QPushButton("播放", objectName="primary")
+        self.header_play_button.setIcon(painted_icon("play", 24))
         self.header_play_button.clicked.connect(self.toggle_playback)
         header_stop_button = QPushButton("停止")
+        header_stop_button.setIcon(painted_icon("stop", 24))
         header_stop_button.clicked.connect(self.emergency_stop)
         next_button = QPushButton("下一首")
+        next_button.setIcon(painted_icon("next", 24))
         next_button.clicked.connect(self._next_score)
-        self.header_record_button = QPushButton("● 录制")
+        self.header_record_button = QPushButton("录制")
+        self.header_record_button.setIcon(painted_icon("record", 24))
+        self.header_record_button.setObjectName("record")
         self.header_record_button.clicked.connect(self.toggle_recording)
         self.shortcut_hint = QLabel()
         self.shortcut_hint.setObjectName("muted")
-        self.profile_combo = QComboBox()
-        self.profile_combo.setMinimumWidth(190)
-        self.profile_combo.setEditable(True)
-        profile_line_edit = self.profile_combo.lineEdit()
-        if profile_line_edit is not None:
-            profile_line_edit.setReadOnly(True)
-            profile_line_edit.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.shortcut_hint.hide()
+        self.profile_combo = ProfileSelector()
         self.profile_combo.setPlaceholderText("选择配置方案")
         self.profile_combo.currentIndexChanged.connect(self._select_profile)
-        header.addWidget(brand)
         header.addStretch()
         header.addWidget(previous_button)
         header.addWidget(self.header_play_button)
         header.addWidget(header_stop_button)
         header.addWidget(next_button)
         header.addWidget(self.header_record_button)
-        header.addSpacing(10)
-        header.addWidget(self.shortcut_hint)
-        header.addSpacing(12)
+        divider = QLabel("│", objectName="commandDivider")
+        header.addWidget(divider)
         header.addWidget(self.profile_combo)
         return header_widget
 
@@ -292,14 +364,16 @@ class MainWindow(QMainWindow):
 
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(24, 20, 24, 18)
-        layout.setSpacing(14)
+        layout.setContentsMargins(28, 24, 28, 22)
+        layout.setSpacing(18)
         heading_row = QHBoxLayout()
         heading_box = QVBoxLayout()
         heading_box.addWidget(QLabel("曲谱", objectName="displayTitle"))
         heading_box.addWidget(QLabel("管理、预览、编辑和播放本地曲谱", objectName="muted"))
         import_button = QPushButton("导入")
         import_button.clicked.connect(self._import_score)
+        self.delete_button = QPushButton("删除")
+        self.delete_button.clicked.connect(self._delete_current_score)
         self.page_record_button = QPushButton("录制演奏")
         self.page_record_button.clicked.connect(self.toggle_recording)
         new_button = QPushButton("新建曲谱", objectName="primary")
@@ -307,6 +381,7 @@ class MainWindow(QMainWindow):
         heading_row.addLayout(heading_box)
         heading_row.addStretch()
         heading_row.addWidget(import_button)
+        heading_row.addWidget(self.delete_button)
         heading_row.addWidget(self.page_record_button)
         heading_row.addWidget(new_button)
         self.record_buttons = [self.header_record_button, self.page_record_button]
@@ -316,6 +391,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self._build_playlist())
         splitter.addWidget(self._build_preview())
         splitter.setSizes([250, 650])
+        splitter.setHandleWidth(16)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter, 1)
@@ -330,8 +406,8 @@ class MainWindow(QMainWindow):
         """
 
         panel = QWidget(objectName="pageCard")
-        panel.setMinimumWidth(190)
-        panel.setMaximumWidth(330)
+        panel.setMinimumWidth(220)
+        panel.setMaximumWidth(350)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(14, 14, 14, 12)
         self.search_edit = QLineEdit()
@@ -340,14 +416,8 @@ class MainWindow(QMainWindow):
         self.playlist = QListWidget()
         self.playlist.currentItemChanged.connect(self._on_playlist_selection)
         self.playlist.itemDoubleClicked.connect(lambda _item: self._edit_current())
-        actions = QHBoxLayout()
-        delete_button = QPushButton("删除")
-        delete_button.clicked.connect(self._delete_current_score)
-        actions.addWidget(delete_button)
-        actions.addStretch()
         layout.addWidget(self.search_edit)
         layout.addWidget(self.playlist, 1)
-        layout.addLayout(actions)
         return panel
 
     def _build_preview(self) -> QWidget:
@@ -401,7 +471,6 @@ class MainWindow(QMainWindow):
         info.addWidget(self.progress)
         self.play_button = QPushButton("播放", objectName="primary")
         self.play_button.clicked.connect(self.toggle_playback)
-        self.play_buttons = [self.header_play_button, self.play_button]
         self.stop_button = QPushButton("停止")
         self.stop_button.clicked.connect(self.emergency_stop)
         layout.addLayout(info, 1)
@@ -476,7 +545,7 @@ class MainWindow(QMainWindow):
         theme_description.addWidget(
             QLabel("应用到主窗口、编辑器、对话框和播放悬浮层", objectName="muted")
         )
-        self.theme_combo = QComboBox()
+        self.theme_combo = SmoothComboBox()
         self.theme_combo.setMinimumWidth(230)
         for theme, label in THEME_LABELS.items():
             self.theme_combo.addItem(label, theme.value)
@@ -500,7 +569,7 @@ class MainWindow(QMainWindow):
         self.playback_overlay_check.setChecked(self.app_settings.show_playback_overlay)
         overlay_layout.addWidget(self.playback_overlay_check, 1, 1)
         overlay_layout.addWidget(QLabel("开始播放或录制前的准备时间"), 2, 0)
-        self.countdown_seconds_spin = QSpinBox()
+        self.countdown_seconds_spin = SmoothSpinBox()
         self.countdown_seconds_spin.setRange(1, 10)
         self.countdown_seconds_spin.setSuffix(" 秒")
         self.countdown_seconds_spin.setValue(self.app_settings.countdown_seconds)
@@ -536,7 +605,7 @@ class MainWindow(QMainWindow):
         shortcuts = QWidget(objectName="settingsSection")
         shortcuts_layout = QGridLayout(shortcuts)
         shortcuts_layout.setContentsMargins(18, 16, 18, 16)
-        shortcuts_layout.setHorizontalSpacing(24)
+        shortcuts_layout.setHorizontalSpacing(16)
         shortcuts_layout.setVerticalSpacing(12)
         shortcuts_layout.addWidget(QLabel("全局控制快捷键", objectName="sectionLabel"), 0, 0, 1, 2)
         shortcuts_layout.addWidget(QLabel("功能", objectName="muted"), 1, 0)
@@ -552,7 +621,13 @@ class MainWindow(QMainWindow):
         ):
             shortcuts_layout.addWidget(QLabel(action), row, 0)
             editor = QKeySequenceEdit(QKeySequence(shortcut.replace("Win+", "Meta+")))
+            editor.setObjectName("shortcutEditor")
             editor.setMaximumSequenceLength(1)
+            editor.setMinimumSize(200, 38)
+            editor.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
             editors.append(editor)
             shortcuts_layout.addWidget(editor, row, 1)
         self.record_hotkey_edit, self.play_hotkey_edit, self.stop_hotkey_edit = editors
@@ -565,31 +640,16 @@ class MainWindow(QMainWindow):
         buttons.addWidget(restore_button)
         buttons.addWidget(save_button)
         shortcuts_layout.addLayout(buttons, 5, 0, 1, 2)
-        shortcuts_layout.addWidget(
-            QLabel("支持单键或 Ctrl / Alt / Shift / Win 组合键；三项不能重复。", objectName="muted"),
-            6, 0, 1, 2,
+        shortcut_hint = QLabel(
+            "支持单键或 Ctrl / Alt / Shift / Win 组合键；三项不能重复。",
+            objectName="muted",
         )
+        shortcut_hint.setWordWrap(True)
+        shortcuts_layout.addWidget(shortcut_hint, 6, 0, 1, 2)
         shortcuts_layout.setColumnStretch(0, 1)
+        shortcuts_layout.setColumnStretch(1, 1)
+        shortcuts_layout.setColumnMinimumWidth(1, 200)
         layout.addWidget(shortcuts)
-
-        mapping = QWidget(objectName="settingsSection")
-        mapping_layout = QVBoxLayout(mapping)
-        mapping_layout.setContentsMargins(18, 16, 18, 16)
-        mapping_layout.setSpacing(10)
-        mapping_layout.addWidget(QLabel("游戏演奏按键", objectName="sectionLabel"))
-        mapping_layout.addWidget(
-            QLabel(
-                "音符、音区和鼠标按键不属于全局快捷键，请在“按键映射”页面中设置。",
-                objectName="muted",
-            )
-        )
-        mapping_button_row = QHBoxLayout()
-        mapping_button_row.addStretch()
-        mapping_button = QPushButton("前往按键映射")
-        mapping_button.clicked.connect(self._open_profile_page_from_settings)
-        mapping_button_row.addWidget(mapping_button)
-        mapping_layout.addLayout(mapping_button_row)
-        layout.addWidget(mapping)
         layout.addStretch()
         return page
 
@@ -653,28 +713,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(data)
         layout.addStretch()
         return page
-
-    def _build_menu(self) -> None:
-        """创建曲谱与配置方案的文件菜单。"""
-
-        menu = self.menuBar().addMenu("文件")
-        new_action = QAction("新建曲谱", self)
-        new_action.triggered.connect(self._new_score)
-        import_action = QAction("导入曲谱…", self)
-        import_action.triggered.connect(self._import_score)
-        record_action = QAction("录制游戏演奏…", self)
-        record_action.triggered.connect(self.toggle_recording)
-        edit_action = QAction("编辑当前曲谱", self)
-        edit_action.triggered.connect(self._edit_current)
-        delete_action = QAction("删除当前曲谱", self)
-        delete_action.triggered.connect(self._delete_current_score)
-        new_profile_action = QAction("新建配置方案…", self)
-        new_profile_action.triggered.connect(self._new_profile)
-        import_profile_action = QAction("导入配置方案…", self)
-        import_profile_action.triggered.connect(self._import_profile)
-        menu.addActions((new_action, import_action, record_action, edit_action, delete_action))
-        menu.addSeparator()
-        menu.addActions((new_profile_action, import_profile_action))
 
     def _initialize_profiles(self) -> Path:
         """初始化 Profile 目录，并兼容迁移早期单文件配置。"""
@@ -855,16 +893,13 @@ class MainWindow(QMainWindow):
             return
         self.pages.setCurrentIndex(index)
         for button_index, button in enumerate(self.navigation_buttons):
-            button.setProperty("active", button_index == index)
+            active = button_index == index
+            button.setChecked(active)
+            button.setProperty("active", active)
             style = button.style()
             style.unpolish(button)
             style.polish(button)
             button.update()
-
-    def _open_profile_page_from_settings(self) -> None:
-        """从快捷键说明直接切换到主导航的按键映射页面。"""
-
-        self._switch_page(1)
 
     def _open_data_directory(self) -> None:
         """使用系统文件管理器打开 KeyScore 应用数据目录。"""
@@ -1065,6 +1100,9 @@ class MainWindow(QMainWindow):
             f"{settings.record_hotkey} 录制    {settings.play_hotkey} 播放 / 暂停    "
             f"{settings.stop_hotkey} 停止"
         )
+        self.header_play_button.setToolTip(f"播放 / 暂停（{settings.play_hotkey}）")
+        self.header_record_button.setToolTip(f"开始 / 完成录制（{settings.record_hotkey}）")
+        self.stop_button.setToolTip(f"紧急停止（{settings.stop_hotkey}）")
         self.countdown_overlay.set_shortcuts(
             settings.record_hotkey,
             settings.stop_hotkey,
@@ -1402,7 +1440,7 @@ class MainWindow(QMainWindow):
         self.countdown_overlay.cancel()
         self.recording_overlay.hide()
         self.profile_combo.setEnabled(True)
-        self.header_record_button.setText("● 录制")
+        self.header_record_button.setText("录制")
         self.page_record_button.setText("录制演奏")
 
     @Slot()
@@ -1667,14 +1705,14 @@ class MainWindow(QMainWindow):
 
         state = PlaybackState(value)
         if state is PlaybackState.PLAYING:
-            for button in self.play_buttons:
-                button.setText("暂停")
+            self.header_play_button.setText("暂停")
+            self.play_button.setText("暂停")
         elif state is PlaybackState.PAUSED:
-            for button in self.play_buttons:
-                button.setText("继续")
+            self.header_play_button.setText("继续")
+            self.play_button.setText("继续")
         elif state is PlaybackState.STOPPED:
-            for button in self.play_buttons:
-                button.setText("播放")
+            self.header_play_button.setText("播放")
+            self.play_button.setText("播放")
             self.playback_overlay.hide()
 
     def _on_event(self, event: object) -> None:

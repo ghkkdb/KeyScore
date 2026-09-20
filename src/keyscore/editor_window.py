@@ -45,7 +45,7 @@ class ScoreEditorWindow(QMainWindow):
         self.resize(780, 620)
         self.setMinimumSize(600, 460)
 
-        central = QWidget()
+        central = QWidget(objectName="editorWindow")
         layout = QVBoxLayout(central)
         layout.setContentsMargins(30, 24, 30, 22)
         layout.setSpacing(12)

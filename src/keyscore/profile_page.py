@@ -8,7 +8,6 @@ from fractions import Fraction
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
@@ -17,7 +16,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -32,6 +30,7 @@ from .models import (
     Octave,
     note_binding_key,
 )
+from .window_chrome import SmoothComboBox, SmoothSpinBox
 
 
 class ProfileMappingPage(QWidget):
@@ -112,7 +111,7 @@ class ProfileMappingPage(QWidget):
         content_layout.addLayout(profile_row)
 
         mode_form = QFormLayout()
-        self.mode_combo = QComboBox()
+        self.mode_combo = SmoothComboBox()
         for mode, label in (
             (MappingMode.DEGREE_MODIFIER, "音级 + 按住修饰键"),
             (MappingMode.ROW_OCTAVE, "三行音区直接映射"),
@@ -135,15 +134,15 @@ class ProfileMappingPage(QWidget):
         parameters_heading = QLabel("演奏参数", objectName="sectionLabel")
         content_layout.addWidget(parameters_heading)
         parameters = QGridLayout()
-        self.output_mode_combo = QComboBox()
-        self.output_mode_combo.addItem("短按触发（推荐）", NoteOutputMode.TAP.value)
+        self.output_mode_combo = SmoothComboBox()
+        self.output_mode_combo.addItem("短按触发", NoteOutputMode.TAP.value)
         self.output_mode_combo.addItem("持续按住", NoteOutputMode.HOLD.value)
         self.output_mode_combo.currentIndexChanged.connect(self._on_output_mode_changed)
-        self.hold_spin = QSpinBox()
+        self.hold_spin = SmoothSpinBox()
         self.hold_spin.setRange(10, 500)
         self.hold_spin.setSuffix(" ms")
         self.hold_spin.valueChanged.connect(lambda _value: self._mark_dirty())
-        self.gap_spin = QSpinBox()
+        self.gap_spin = SmoothSpinBox()
         self.gap_spin.setRange(0, 200)
         self.gap_spin.setSuffix(" ms")
         self.gap_spin.valueChanged.connect(lambda _value: self._mark_dirty())

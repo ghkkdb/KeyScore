@@ -41,7 +41,7 @@ def main() -> int:
     """
 
     try:
-        from PySide6.QtGui import QFont, QFontDatabase
+        from PySide6.QtGui import QFont, QFontDatabase, QIcon
         from PySide6.QtWidgets import QApplication
     except ImportError as error:
         print(
@@ -53,11 +53,13 @@ def main() -> int:
     from .app_settings import load_app_settings
     from .library import default_data_directory
     from .main_window import MainWindow
+    from .resources import app_icon_path
     from .theme import ThemeManager
 
     application = QApplication(sys.argv)
     application.setApplicationName("KeyScore")
     application.setOrganizationName("KeyScore")
+    application.setWindowIcon(QIcon(str(app_icon_path())))
     chinese_translator = install_chinese_translations(application)
     font_id = QFontDatabase.addApplicationFont("C:/Windows/Fonts/msyh.ttc")
     font_families = QFontDatabase.applicationFontFamilies(font_id) if font_id >= 0 else []

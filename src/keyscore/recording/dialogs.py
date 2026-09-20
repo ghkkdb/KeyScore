@@ -7,7 +7,6 @@ from fractions import Fraction
 
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -16,12 +15,12 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from .models import RecordingSettings
+from ..window_chrome import SmoothComboBox, SmoothSpinBox
 
 
 class RecordingSetupDialog(QDialog):
@@ -58,13 +57,13 @@ class RecordingSetupDialog(QDialog):
         form = QFormLayout()
         form.setSpacing(10)
         self.title_edit = QLineEdit(f"游戏录制 {datetime.now():%Y-%m-%d %H-%M}")
-        self.bpm_spin = QSpinBox()
+        self.bpm_spin = SmoothSpinBox()
         self.bpm_spin.setRange(20, 400)
         self.bpm_spin.setValue(default_bpm)
-        self.beat_combo = QComboBox()
+        self.beat_combo = SmoothComboBox()
         self.beat_combo.addItems(("4/4", "3/4", "2/4", "6/8"))
         self.beat_combo.setCurrentText(default_beat)
-        self.grid_combo = QComboBox()
+        self.grid_combo = SmoothComboBox()
         for label, value in (
             ("1 拍", "1"),
             ("1/2 拍", "1/2"),
@@ -73,7 +72,7 @@ class RecordingSetupDialog(QDialog):
         ):
             self.grid_combo.addItem(label, value)
         self.grid_combo.setCurrentIndex(2)
-        self.chord_spin = QSpinBox()
+        self.chord_spin = SmoothSpinBox()
         self.chord_spin.setRange(10, 120)
         self.chord_spin.setSuffix(" ms")
         self.chord_spin.setValue(35)
