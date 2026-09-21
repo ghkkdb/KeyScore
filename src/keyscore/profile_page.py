@@ -28,6 +28,7 @@ from .models import (
     NoteEvent,
     NoteOutputMode,
     Octave,
+    binding_label,
     note_binding_key,
 )
 from .window_chrome import SmoothComboBox, SmoothSpinBox
@@ -38,6 +39,7 @@ class ProfileMappingPage(QWidget):
 
     save_requested = Signal(object, str)
     new_requested = Signal()
+    delete_requested = Signal()
     import_requested = Signal()
     dirty_changed = Signal(bool)
 
@@ -102,11 +104,14 @@ class ProfileMappingPage(QWidget):
         self.name_edit.textChanged.connect(lambda _text: self._mark_dirty())
         new_button = QPushButton("新建")
         new_button.clicked.connect(self.new_requested.emit)
+        self.delete_profile_button = QPushButton("删除")
+        self.delete_profile_button.clicked.connect(self.delete_requested.emit)
         import_button = QPushButton("导入")
         import_button.clicked.connect(self.import_requested.emit)
         profile_row.addWidget(QLabel("方案名称"))
         profile_row.addWidget(self.name_edit, 1)
         profile_row.addWidget(new_button)
+        profile_row.addWidget(self.delete_profile_button)
         profile_row.addWidget(import_button)
         content_layout.addLayout(profile_row)
 
@@ -226,7 +231,7 @@ class ProfileMappingPage(QWidget):
                 str: 按钮显示文字。
             """
 
-            label = value.label if value is not None else "未设置"
+            label = binding_label(value) if value is not None else "未设置"
             return f"{prefix}\n{label}" if prefix else label
 
         button = QPushButton(button_text(binding), objectName="binding")
@@ -363,7 +368,7 @@ class ProfileMappingPage(QWidget):
             )
         else:
             self.mapping_hint.setText(
-                "五个音区的自然音与半音分别成行，每个音符可独立绑定。"
+                "五个音区分别设置自然音和五个独立半音；升 Mi、升 Si 会自动规范为 Fa 和高一音区 Do。"
             )
             rows = tuple(
                 (octave, f"{prefix}{octave_label}音", is_semitone, prefix)
@@ -379,6 +384,12 @@ class ProfileMappingPage(QWidget):
         for row, (octave, label_text, is_semitone, _prefix) in enumerate(rows, start=1):
             grid.addWidget(QLabel(label_text), row, 0)
             for degree in range(1, 8):
+                if is_semitone and degree in {3, 7}:
+                    placeholder = QLabel("—", objectName="muted")
+                    placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    placeholder.setToolTip("该位置没有独立黑键")
+                    grid.addWidget(placeholder, row, degree)
+                    continue
                 note = NoteEvent(Fraction(0), Fraction(1), degree, octave, is_semitone)
                 key = note_binding_key(note)
                 button = self._create_binding_button(

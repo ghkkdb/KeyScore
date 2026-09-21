@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,14 +12,17 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtGui import QIcon, QKeySequence, QPixmap
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 
 from keyscore.app_settings import ThemeId, load_app_settings
 from keyscore.main_window import MainWindow
+from keyscore.models import default_profile
+from keyscore.parser import parse_score
 from keyscore.piano_roll import PianoRollEditor
 from keyscore.resources import app_icon_path
 from keyscore.theme import ThemeManager
+from keyscore.profile_store import save_profile
 from keyscore.window_chrome import ProfileSelector, SmoothComboBox, SmoothSpinBox
 
 
@@ -81,12 +85,124 @@ class SettingsPageTests(unittest.TestCase):
                 self.assertEqual(window.pages.currentIndex(), 3)
                 labels = [label.text() for label in window.findChildren(QLabel)]
                 self.assertIn("版本 0.1.0", labels)
+                self.assertNotIn("应用信息", labels)
+                self.assertNotIn("运行平台", labels)
+                self.assertIn("https://github.com/ghkkdb/KeyScore", labels)
+                self.assertIn(
+                    "https://space.bilibili.com/417156717?spm_id_from=333.1007.0.0",
+                    labels,
+                )
                 self.assertTrue(window.playback_overlay_check.isChecked())
                 self.assertEqual(window.countdown_seconds_spin.value(), 3)
                 self.assertTrue(window.countdown_overlay_check.isChecked())
                 self.assertGreaterEqual(window.record_hotkey_edit.minimumWidth(), 200)
+                self.assertFalse(window.score_sort_button.icon().isNull())
+                self.assertFalse(window.score_sort_button.toolTip())
+                self.assertIn(
+                    "按时间", str(window.score_sort_button.property("hoverHint"))
+                )
+                QApplication.sendEvent(
+                    window.score_sort_button,
+                    QEvent(QEvent.Type.Enter),
+                )
+                self.assertIn("当前：按时间", window.navigation_hint.text())
+                with patch(
+                    "keyscore.main_window.QDesktopServices.openUrl",
+                    return_value=True,
+                ) as open_url:
+                    window.github_website_button.click()
+                self.assertEqual(
+                    open_url.call_args.args[0].toString(),
+                    "https://github.com/ghkkdb/KeyScore",
+                )
                 labels = [label.text() for label in window.findChildren(QLabel)]
                 self.assertNotIn("游戏演奏按键", labels)
+            finally:
+                window.close()
+
+    def test_new_score_stays_in_memory_until_saved(self) -> None:
+        """点击新建只应打开含一个中音的草稿，不立即写入曲谱库。"""
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {"KEYSCORE_DATA_DIR": directory},
+        ):
+            manager = ThemeManager(self.application, ThemeId.FLUENT)
+            window = MainWindow(manager, Path(directory) / "app_settings.json")
+            try:
+                before = set(window.library.scores_directory.glob("*.txt"))
+                with patch.object(window, "_open_editor") as open_editor:
+                    window._new_score()
+                after = set(window.library.scores_directory.glob("*.txt"))
+                self.assertEqual(before, after)
+                self.assertIsNone(open_editor.call_args.args[0])
+                draft = parse_score(open_editor.call_args.kwargs["initial_text"])
+                self.assertEqual(len(draft.notes), 1)
+                self.assertEqual(draft.notes[0].degree, 1)
+            finally:
+                window.close()
+
+    def test_score_list_can_sort_by_time_and_title(self) -> None:
+        """曲谱列表应能在最近修改和首字母顺序之间切换。"""
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {"KEYSCORE_DATA_DIR": directory},
+        ):
+            manager = ThemeManager(self.application, ThemeId.FLUENT)
+            window = MainWindow(manager, Path(directory) / "app_settings.json")
+            try:
+                first = window.library.save_score_text("@title A曲\n1")
+                second = window.library.save_score_text("@title B曲\n1")
+                chinese_a = window.library.save_score_text("@title 安河桥\n1")
+                chinese_y = window.library.save_score_text("@title 云宫迅音\n1")
+                now = time.time()
+                os.utime(first.path, (now + 10, now + 10))
+                os.utime(second.path, (now + 20, now + 20))
+                window._refresh_library()
+                self.assertEqual(window.playlist.item(0).text(), "B曲")
+
+                window.score_sort_button.click()
+                self.assertEqual(window.playlist.item(0).text(), "A曲")
+                titles = [
+                    window.playlist.item(index).text()
+                    for index in range(window.playlist.count())
+                ]
+                self.assertLess(titles.index(chinese_a.title), titles.index(chinese_y.title))
+                self.assertIn(
+                    "英文/拼音",
+                    str(window.score_sort_button.property("hoverHint")),
+                )
+            finally:
+                window.close()
+
+    def test_delete_profile_keeps_one_profile_and_switches(self) -> None:
+        """删除当前方案后应切换到剩余方案，最后一个方案不可删除。"""
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {"KEYSCORE_DATA_DIR": directory},
+        ):
+            manager = ThemeManager(self.application, ThemeId.FLUENT)
+            window = MainWindow(manager, Path(directory) / "app_settings.json")
+            try:
+                second = default_profile()
+                second.name = "第二方案"
+                save_profile(
+                    second,
+                    window.profiles_directory / "第二方案.ksprofile.json",
+                )
+                window._refresh_profile_combo()
+                target = window.profile_path
+                with patch.object(
+                    QMessageBox,
+                    "question",
+                    return_value=QMessageBox.StandardButton.Yes,
+                ):
+                    window._delete_profile()
+                self.assertFalse(target.exists())
+                self.assertEqual(window.profile_combo.count(), 1)
+                self.assertFalse(window.profile_page.delete_profile_button.isEnabled())
             finally:
                 window.close()
 
@@ -116,6 +232,9 @@ class SettingsPageTests(unittest.TestCase):
                 window.record_hotkey_edit.setKeySequence(QKeySequence("Ctrl+F8"))
                 window.play_hotkey_edit.setKeySequence(QKeySequence("Alt+P"))
                 window.stop_hotkey_edit.setKeySequence(QKeySequence("Shift+F10"))
+                window.duration_hotkey_edit.setKeySequence(QKeySequence("Ctrl+D"))
+                window.duration_presets_edit.setText("1/8, 1/2, 3/4, 1, 3")
+                window.default_duration_edit.setText("3/4")
                 with patch.object(window.hotkeys, "configure", return_value=True):
                     window._save_hotkey_settings()
 
@@ -123,6 +242,9 @@ class SettingsPageTests(unittest.TestCase):
                 self.assertEqual(settings.record_hotkey, "Ctrl+F8")
                 self.assertEqual(settings.play_hotkey, "Alt+P")
                 self.assertEqual(settings.stop_hotkey, "Shift+F10")
+                self.assertEqual(settings.duration_cycle_hotkey, "Ctrl+D")
+                self.assertEqual(settings.default_note_duration, "3/4")
+                self.assertEqual(settings.duration_presets[-1], "3")
                 self.assertIn("Ctrl+F8 录制", window.shortcut_hint.text())
                 self.assertIn("Alt+P 播放", window.shortcut_hint.text())
             finally:

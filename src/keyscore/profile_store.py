@@ -28,7 +28,7 @@ def save_profile(profile: GameProfile, path: Path) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "version": 4,
+        "version": 5,
         "name": profile.name,
         "mapping_mode": profile.mapping_mode.value,
         "note_output_mode": profile.note_output_mode.value,
@@ -315,6 +315,7 @@ def _binding_to_dict(binding: Binding) -> dict[str, object]:
         "code": binding.code,
         "label": binding.label,
         "extended": binding.extended,
+        "modifiers": [_binding_to_dict(value) for value in binding.modifiers],
     }
 
 
@@ -334,9 +335,13 @@ def _binding_from_dict(value: object) -> Binding:
 
     if not isinstance(value, dict):
         raise ValueError("绑定格式无效")
+    modifiers_payload = value.get("modifiers", [])
+    if not isinstance(modifiers_payload, list):
+        raise ValueError("绑定修饰键格式无效")
     return Binding(
         BindingKind(str(value["kind"])),
         int(value["code"]),
         str(value["label"]),
         bool(value.get("extended", False)),
+        tuple(_binding_from_dict(item) for item in modifiers_payload),
     )

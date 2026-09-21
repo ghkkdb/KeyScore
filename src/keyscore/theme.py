@@ -141,6 +141,8 @@ QLabel#shortcutKey {
 QToolButton#navigation { background: transparent; color: #35547E; border: none; border-radius: 12px; font-size: 25px; }
 QToolButton#navigation:hover { background: #E6F2FF; color: #087BEB; }
 QToolButton#navigation[active="true"] { background: #D8EAFF; color: #087AF0; font-weight: 700; }
+QToolButton#sortToggle { background: rgba(255,255,255,218); border: 1px solid #C8DAEA; border-radius: 11px; }
+QToolButton#sortToggle:hover { background: #EAF4FE; border-color: #8EBDEB; }
 QToolButton#windowMinimize, QToolButton#windowMaximize, QToolButton#windowClose {
     background: transparent; color: #28456D; border: none; border-radius: 7px; font-size: 20px;
 }
@@ -296,6 +298,8 @@ QLabel#shortcutKey {
 QToolButton#navigation { background: transparent; color: #82A1C7; border: none; border-radius: 12px; font-size: 25px; }
 QToolButton#navigation:hover { background: #101F3D; color: #73EAFF; }
 QToolButton#navigation[active="true"] { background: #32205E; color: #73EAFF; border: 1px solid #00BDEB; font-weight: 700; }
+QToolButton#sortToggle { background: #0B1429; border: 1px solid #25477C; border-radius: 11px; }
+QToolButton#sortToggle:hover { background: #101F3D; border-color: #00BDEB; }
 QToolButton#windowMinimize, QToolButton#windowMaximize, QToolButton#windowClose { background: transparent; color: #91ACCC; border: none; border-radius: 7px; font-size: 20px; }
 QToolButton#windowMinimize:hover, QToolButton#windowMaximize:hover { background: #132846; color: #CFF8FF; }
 QToolButton#windowClose:hover { background: #D93854; color: #FFFFFF; }

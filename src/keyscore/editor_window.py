@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from fractions import Fraction
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QCloseEvent, QFont, QTextCursor
+from PySide6.QtGui import QCloseEvent, QFont, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
@@ -34,22 +35,37 @@ class ScoreEditorWindow(QMainWindow):
 
     saved = Signal(object)
 
-    def __init__(self, path: Path, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        path: Path | None,
+        parent: QWidget | None = None,
+        duration_presets: tuple[str, ...] = ("1/4", "1/2", "3/4", "1", "2", "4"),
+        default_note_duration: str = "1",
+        duration_cycle_hotkey: str = "D",
+        initial_text: str | None = None,
+        save_new: Callable[[str], Path] | None = None,
+    ) -> None:
         """
         初始化曲谱编辑窗口。
 
         Args:
-            path (Path): 待编辑文件路径。
+            path (Path | None): 待编辑文件路径；新建草稿时为空。
             parent (QWidget | None): 父窗口。
+            duration_presets (tuple[str, ...]): 新音符常用拍数。
+            default_note_duration (str): 打开编辑器时默认选中的拍数。
+            duration_cycle_hotkey (str): 循环切换拍数的窗口快捷键。
+            initial_text (str | None): 新建草稿使用的初始曲谱文本。
+            save_new (Callable[[str], Path] | None): 保存新建草稿的回调。
         """
 
         super().__init__(parent)
         self.path = path
+        self._save_new = save_new
         self._syncing_views = False
         self._roll_dirty = False
         self._text_dirty = False
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self.setWindowTitle(f"编辑 · {path.stem}")
+        self.setWindowTitle(f"编辑 · {path.stem}" if path is not None else "新建曲谱")
         self.resize(980, 700)
         self.setMinimumSize(760, 540)
 
@@ -67,7 +83,12 @@ class ScoreEditorWindow(QMainWindow):
         header.addWidget(syntax)
 
         self.editor = QPlainTextEdit()
-        source_text = path.read_text(encoding="utf-8")
+        if path is None:
+            if initial_text is None or save_new is None:
+                raise ValueError("新建曲谱缺少初始内容或保存回调")
+            source_text = initial_text
+        else:
+            source_text = path.read_text(encoding="utf-8")
         self.editor.setPlainText(source_text)
         font = QFont("Cascadia Mono")
         font.setStyleHint(QFont.StyleHint.Monospace)
@@ -100,15 +121,11 @@ class ScoreEditorWindow(QMainWindow):
         ):
             self.grid_combo.addItem(f"网格 {label}", value)
         self.grid_combo.setCurrentIndex(2)
-        for label, value in (
-            ("1/4 拍", "1/4"),
-            ("1/2 拍", "1/2"),
-            ("1 拍", "1"),
-            ("2 拍", "2"),
-            ("4 拍", "4"),
-        ):
-            self.duration_combo.addItem(f"新音符 {label}", value)
-        self.duration_combo.setCurrentIndex(2)
+        for value in duration_presets:
+            self.duration_combo.addItem(f"新音符 {value} 拍", value)
+        self.duration_combo.setCurrentIndex(
+            max(0, self.duration_combo.findData(default_note_duration))
+        )
         self.roll_editor = PianoRollEditor(editable=True)
         self.roll_editor.setMinimumHeight(360)
         self.roll_editor.document_changed.connect(self._on_roll_document_changed)
@@ -203,6 +220,11 @@ class ScoreEditorWindow(QMainWindow):
         layout.addWidget(self.editor_tabs, 1)
         layout.addLayout(footer)
         self.setCentralWidget(central)
+        self.duration_shortcut = QShortcut(
+            QKeySequence(duration_cycle_hotkey.replace("Win+", "Meta+")), self
+        )
+        self.duration_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.duration_shortcut.activated.connect(self._cycle_note_duration)
         try:
             self.roll_editor.set_score_document(document_from_text(source_text))
         except ScoreParseError:
@@ -210,7 +232,45 @@ class ScoreEditorWindow(QMainWindow):
         self._apply_roll_grid()
         self._apply_roll_duration()
         self._validate()
-        self.editor.document().setModified(False)
+        self.editor.document().setModified(path is None)
+
+    def set_duration_settings(
+        self,
+        presets: tuple[str, ...],
+        default_duration: str,
+        hotkey: str,
+    ) -> None:
+        """
+        刷新拍数预设和编辑器快捷键，并尽量保留当前选择。
+
+        Args:
+            presets (tuple[str, ...]): 规范化后的常用拍数。
+            default_duration (str): 当前选择失效时采用的默认拍数。
+            hotkey (str): 循环切换拍数的快捷键。
+        """
+
+        current = str(self.duration_combo.currentData() or default_duration)
+        self.duration_combo.blockSignals(True)
+        self.duration_combo.clear()
+        for value in presets:
+            self.duration_combo.addItem(f"新音符 {value} 拍", value)
+        selected = current if current in presets else default_duration
+        self.duration_combo.setCurrentIndex(max(0, self.duration_combo.findData(selected)))
+        self.duration_combo.blockSignals(False)
+        self.duration_shortcut.setKey(QKeySequence(hotkey.replace("Win+", "Meta+")))
+        self._apply_roll_duration()
+
+    def _cycle_note_duration(self) -> None:
+        """循环切换到用户拍数列表中的下一项。"""
+
+        if self.editor_tabs.currentIndex() != 0 or self.duration_combo.count() == 0:
+            return
+        next_index = (self.duration_combo.currentIndex() + 1) % self.duration_combo.count()
+        self.duration_combo.setCurrentIndex(next_index)
+        self.validation_label.setText(
+            f"新音符拍数：{self.duration_combo.currentData()} 拍"
+        )
+        set_widget_state(self.validation_label, "normal")
 
     def _apply_roll_grid(self, _index: int = -1) -> None:
         """
@@ -299,6 +359,7 @@ class ScoreEditorWindow(QMainWindow):
             index (int): 当前标签页索引。
         """
 
+        self.duration_shortcut.setEnabled(index == 0)
         if self._syncing_views:
             return
         if index == 1:
@@ -314,6 +375,7 @@ class ScoreEditorWindow(QMainWindow):
             self.editor_tabs.blockSignals(True)
             self.editor_tabs.setCurrentIndex(1)
             self.editor_tabs.blockSignals(False)
+            self.duration_shortcut.setEnabled(False)
             self.editor.setFocus()
             return
         self.roll_editor.set_score_document(document)
@@ -432,8 +494,13 @@ class ScoreEditorWindow(QMainWindow):
             QMessageBox.warning(self, "无法保存", str(exc))
             return
         try:
-            self.path.write_text(self.editor.toPlainText(), encoding="utf-8")
-            self.path = rename_score_file(self.path, score.title)
+            if self.path is None:
+                if self._save_new is None:
+                    raise ValueError("新建曲谱没有可用的保存位置")
+                self.path = self._save_new(self.editor.toPlainText())
+            else:
+                self.path.write_text(self.editor.toPlainText(), encoding="utf-8")
+                self.path = rename_score_file(self.path, score.title)
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "保存失败", str(exc))
             return

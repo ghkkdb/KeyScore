@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, replace
 from fractions import Fraction
 
-from .models import NoteEvent, Octave, Score
+from .models import NoteEvent, Octave, Score, normalize_pitch
 
 
 _TOKEN_PATTERN = re.compile(
@@ -113,11 +113,19 @@ def _parse_single(token: str, line: int, allow_rest: bool = True) -> _ParsedToke
     duration = _parse_duration(match.group("duration"), line, token)
     if degree == 0 and match.group("sharp"):
         raise ScoreParseError("休止符不能使用半音修饰", line, token)
-    notes = (
-        ()
-        if degree == 0
-        else ((degree, _octave_from_prefix(match.group("octave")), bool(match.group("sharp"))),)
-    )
+    if degree == 0:
+        notes = ()
+    else:
+        try:
+            notes = (
+                normalize_pitch(
+                    degree,
+                    _octave_from_prefix(match.group("octave")),
+                    bool(match.group("sharp")),
+                ),
+            )
+        except ValueError as exc:
+            raise ScoreParseError(str(exc), line, token) from exc
     return _ParsedToken(notes=notes, duration=duration)
 
 

@@ -2,18 +2,30 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 import time
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QSize, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import (
+    QCollator,
+    QEvent,
+    QLocale,
+    QObject,
+    QPoint,
+    QSize,
+    Qt,
+    QTimer,
+    QUrl,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QCloseEvent, QColor, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QFileDialog,
-    QFormLayout,
     QGraphicsDropShadowEffect,
     QGridLayout,
     QHBoxLayout,
@@ -35,7 +47,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .app_settings import AppSettings, ThemeId, load_app_settings, save_app_settings
+from .app_settings import (
+    AppSettings,
+    ThemeId,
+    load_app_settings,
+    normalize_duration,
+    save_app_settings,
+)
 from . import __version__
 from .compiler import PlanCompileError, compile_score
 from .editor_window import ScoreEditorWindow
@@ -128,6 +146,13 @@ class MainWindow(FramelessMainWindow):
         self.theme_manager = theme_manager
         self.app_settings_path = app_settings_path
         self.app_settings = load_app_settings(app_settings_path)
+        self.score_title_collator = QCollator(
+            QLocale(QLocale.Language.Chinese, QLocale.Country.China)
+        )
+        self.score_title_collator.setCaseSensitivity(
+            Qt.CaseSensitivity.CaseInsensitive
+        )
+        self.score_title_collator.setNumericMode(True)
 
         self.data_directory = default_data_directory()
         self.library = ScoreLibrary(self.data_directory)
@@ -265,6 +290,7 @@ class MainWindow(FramelessMainWindow):
         self.profile_page = ProfileMappingPage()
         self.profile_page.save_requested.connect(self._save_profile_changes)
         self.profile_page.new_requested.connect(self._new_profile)
+        self.profile_page.delete_requested.connect(self._delete_profile)
         self.profile_page.import_requested.connect(self._import_profile)
         self.pages.addWidget(self.profile_page)
         self.pages.addWidget(self._build_settings_page())
@@ -301,7 +327,7 @@ class MainWindow(FramelessMainWindow):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         """
-        为左侧导航图标显示应用内圆角文字提示。
+        为导航图标和排序按钮显示应用内圆角文字提示。
 
         Args:
             watched (QObject): 当前接收事件的对象。
@@ -311,23 +337,54 @@ class MainWindow(FramelessMainWindow):
             bool: 事件是否已经被处理。
         """
 
-        if (
+        is_navigation_button = (
             hasattr(self, "navigation_buttons")
             and watched in self.navigation_buttons
-            and hasattr(self, "navigation_hint")
+        )
+        is_sort_button = (
+            hasattr(self, "score_sort_button")
+            and watched is self.score_sort_button
+        )
+        if (is_navigation_button or is_sort_button) and hasattr(
+            self, "navigation_hint"
         ):
             if event.type() is QEvent.Type.Enter:
                 button = watched
                 if isinstance(button, QToolButton):
-                    self.navigation_hint.setText(button.text())
-                    self.navigation_hint.adjustSize()
-                    position = button.mapTo(
-                        self.body_widget,
-                        QPoint(
-                            button.width() + 10,
-                            (button.height() - self.navigation_hint.height()) // 2,
-                        ),
+                    hint_text = (
+                        button.text()
+                        if is_navigation_button
+                        else str(button.property("hoverHint") or "")
                     )
+                    self.navigation_hint.setText(hint_text)
+                    self.navigation_hint.adjustSize()
+                    if is_navigation_button:
+                        position = button.mapTo(
+                            self.body_widget,
+                            QPoint(
+                                button.width() + 10,
+                                (button.height() - self.navigation_hint.height()) // 2,
+                            ),
+                        )
+                    else:
+                        position = button.mapTo(
+                            self.body_widget,
+                            QPoint(
+                                button.width() - self.navigation_hint.width(),
+                                button.height() + 8,
+                            ),
+                        )
+                        position.setX(
+                            max(
+                                8,
+                                min(
+                                    position.x(),
+                                    self.body_widget.width()
+                                    - self.navigation_hint.width()
+                                    - 8,
+                                ),
+                            )
+                        )
                     self.navigation_hint.move(position)
                     self.navigation_hint.raise_()
                     self.navigation_hint.show()
@@ -458,10 +515,20 @@ class MainWindow(FramelessMainWindow):
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("搜索曲谱…")
         self.search_edit.textChanged.connect(self._filter_playlist)
+        self.score_sort_button = QToolButton(objectName="sortToggle")
+        self.score_sort_button.setFixedSize(38, 38)
+        self.score_sort_button.setIconSize(QSize(22, 22))
+        self.score_sort_button.clicked.connect(self._toggle_score_sort)
+        self.score_sort_button.installEventFilter(self)
+        self._update_score_sort_button()
         self.playlist = QListWidget()
         self.playlist.currentItemChanged.connect(self._on_playlist_selection)
         self.playlist.itemDoubleClicked.connect(lambda _item: self._edit_current())
-        layout.addWidget(self.search_edit)
+        search_row = QHBoxLayout()
+        search_row.setSpacing(8)
+        search_row.addWidget(self.search_edit, 1)
+        search_row.addWidget(self.score_sort_button)
+        layout.addLayout(search_row)
         layout.addWidget(self.playlist, 1)
         return panel
 
@@ -621,7 +688,7 @@ class MainWindow(FramelessMainWindow):
         layout.setSpacing(14)
         layout.addWidget(QLabel("快捷键", objectName="dialogTitle"))
         layout.addWidget(
-            QLabel("自定义用于控制 KeyScore 的全局快捷键", objectName="muted")
+            QLabel("自定义全局控制快捷键和曲谱编辑器拍数", objectName="muted")
         )
         shortcuts = QWidget(objectName="settingsSection")
         shortcuts_layout = QGridLayout(shortcuts)
@@ -652,6 +719,28 @@ class MainWindow(FramelessMainWindow):
             editors.append(editor)
             shortcuts_layout.addWidget(editor, row, 1)
         self.record_hotkey_edit, self.play_hotkey_edit, self.stop_hotkey_edit = editors
+        shortcuts_layout.addWidget(
+            QLabel("编辑器快捷键", objectName="sectionLabel"), 5, 0, 1, 2
+        )
+        shortcuts_layout.addWidget(QLabel("切换新音符拍数"), 6, 0)
+        self.duration_hotkey_edit = QKeySequenceEdit(
+            QKeySequence(self.app_settings.duration_cycle_hotkey.replace("Win+", "Meta+"))
+        )
+        self.duration_hotkey_edit.setObjectName("shortcutEditor")
+        self.duration_hotkey_edit.setMaximumSequenceLength(1)
+        self.duration_hotkey_edit.setMinimumSize(200, 38)
+        shortcuts_layout.addWidget(self.duration_hotkey_edit, 6, 1)
+        shortcuts_layout.addWidget(QLabel("常用拍数"), 7, 0)
+        self.duration_presets_edit = QLineEdit(
+            ", ".join(self.app_settings.duration_presets)
+        )
+        self.duration_presets_edit.setPlaceholderText("例如：1/4, 1/2, 3/4, 1, 2, 4")
+        self.duration_presets_edit.setToolTip("使用逗号分隔；列表顺序也是快捷键循环顺序")
+        shortcuts_layout.addWidget(self.duration_presets_edit, 7, 1)
+        shortcuts_layout.addWidget(QLabel("默认新音符拍数"), 8, 0)
+        self.default_duration_edit = QLineEdit(self.app_settings.default_note_duration)
+        self.default_duration_edit.setPlaceholderText("例如：1 或 3/4")
+        shortcuts_layout.addWidget(self.default_duration_edit, 8, 1)
         buttons = QHBoxLayout()
         buttons.addStretch()
         restore_button = QPushButton("恢复默认")
@@ -660,13 +749,14 @@ class MainWindow(FramelessMainWindow):
         save_button.clicked.connect(self._save_hotkey_settings)
         buttons.addWidget(restore_button)
         buttons.addWidget(save_button)
-        shortcuts_layout.addLayout(buttons, 5, 0, 1, 2)
+        shortcuts_layout.addLayout(buttons, 9, 0, 1, 2)
         shortcut_hint = QLabel(
-            "支持单键或 Ctrl / Alt / Shift / Win 组合键；三项不能重复。",
+            "快捷键支持单键或 Ctrl / Alt / Shift / Win 组合；四项不能重复。"
+            "拍数支持整数、小数和分数，使用逗号分隔。",
             objectName="muted",
         )
         shortcut_hint.setWordWrap(True)
-        shortcuts_layout.addWidget(shortcut_hint, 6, 0, 1, 2)
+        shortcuts_layout.addWidget(shortcut_hint, 10, 0, 1, 2)
         shortcuts_layout.setColumnStretch(0, 1)
         shortcuts_layout.setColumnStretch(1, 1)
         shortcuts_layout.setColumnMinimumWidth(1, 200)
@@ -676,7 +766,7 @@ class MainWindow(FramelessMainWindow):
 
     def _build_about_page(self) -> QWidget:
         """
-        创建与设置同级的版本、运行信息和本地数据目录页面。
+        创建与设置同级的版本、相关网站和本地数据目录页面。
 
         Returns:
             QWidget: 关于页面。
@@ -687,7 +777,7 @@ class MainWindow(FramelessMainWindow):
         layout.setContentsMargins(24, 20, 24, 18)
         layout.setSpacing(14)
         layout.addWidget(QLabel("关于", objectName="displayTitle"))
-        layout.addWidget(QLabel("KeyScore 的版本和本地运行信息", objectName="muted"))
+        layout.addWidget(QLabel("KeyScore 的版本、相关网站和数据目录", objectName="muted"))
 
         product = QWidget(objectName="settingsSection")
         product_layout = QVBoxLayout(product)
@@ -703,18 +793,44 @@ class MainWindow(FramelessMainWindow):
         )
         layout.addWidget(product)
 
-        information = QWidget(objectName="settingsSection")
-        information_layout = QVBoxLayout(information)
-        information_layout.setContentsMargins(18, 16, 18, 16)
-        information_layout.setSpacing(10)
-        information_layout.addWidget(QLabel("应用信息", objectName="sectionLabel"))
-        information_form = QFormLayout()
-        information_form.setSpacing(10)
-        information_form.addRow("运行平台", QLabel("Windows 10 / 11"))
-        information_form.addRow("界面框架", QLabel("PySide6"))
-        information_form.addRow("数据存储", QLabel("仅保存在本地"))
-        information_layout.addLayout(information_form)
-        layout.addWidget(information)
+        websites = QWidget(objectName="settingsSection")
+        websites_layout = QVBoxLayout(websites)
+        websites_layout.setContentsMargins(18, 16, 18, 16)
+        websites_layout.setSpacing(10)
+        websites_layout.addWidget(QLabel("相关网站", objectName="sectionLabel"))
+
+        github_url = "https://github.com/ghkkdb/KeyScore"
+        github_row = QHBoxLayout()
+        github_label = QLabel(github_url, objectName="muted")
+        github_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        github_label.setWordWrap(True)
+        github_row.addWidget(github_label, 1)
+        self.github_website_button = QPushButton("GitHub 项目主页 ↗")
+        self.github_website_button.clicked.connect(
+            lambda _checked=False: self._open_website(github_url)
+        )
+        github_row.addWidget(self.github_website_button)
+        websites_layout.addLayout(github_row)
+
+        bilibili_url = (
+            "https://space.bilibili.com/417156717?spm_id_from=333.1007.0.0"
+        )
+        bilibili_row = QHBoxLayout()
+        bilibili_label = QLabel(bilibili_url, objectName="muted")
+        bilibili_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        bilibili_label.setWordWrap(True)
+        bilibili_row.addWidget(bilibili_label, 1)
+        self.bilibili_website_button = QPushButton("哔哩哔哩个人空间 ↗")
+        self.bilibili_website_button.clicked.connect(
+            lambda _checked=False: self._open_website(bilibili_url)
+        )
+        bilibili_row.addWidget(self.bilibili_website_button)
+        websites_layout.addLayout(bilibili_row)
+        layout.addWidget(websites)
 
         data = QWidget(objectName="settingsSection")
         data_layout = QVBoxLayout(data)
@@ -765,6 +881,9 @@ class MainWindow(FramelessMainWindow):
         if self.profile_combo.count():
             self.profile_combo.setEditText(self.profile_combo.itemText(selected_index))
         self.profile_combo.blockSignals(False)
+        self.profile_page.delete_profile_button.setEnabled(
+            self.profile_combo.count() > 1
+        )
         if self.profile_combo.count():
             self._select_profile(self.profile_combo.currentIndex(), show_status=False)
 
@@ -881,6 +1000,47 @@ class MainWindow(FramelessMainWindow):
         self._refresh_profile_combo()
         self.statusBar().showMessage(f"已导入并切换配置方案：{self.profile.name}")
 
+    def _delete_profile(self) -> None:
+        """确认后删除当前配置方案，并切换到剩余方案。"""
+
+        paths = list_profile_paths(self.profiles_directory)
+        if len(paths) <= 1:
+            QMessageBox.warning(self, "无法删除", "至少需要保留一个配置方案")
+            return
+        if not self._confirm_discard_profile_changes():
+            return
+        result = QMessageBox.question(
+            self,
+            "删除配置方案？",
+            f"确定删除配置方案“{self.profile.name}”吗？此操作无法撤销。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            return
+        target = self.profile_path.resolve()
+        directory = self.profiles_directory.resolve()
+        if target.parent != directory or target not in {path.resolve() for path in paths}:
+            QMessageBox.warning(self, "删除失败", "当前配置方案不属于本地方案目录")
+            return
+        self._discard_playback_plan()
+        try:
+            self.profile_path.unlink()
+        except OSError as exc:
+            QMessageBox.warning(self, "删除失败", str(exc))
+            return
+        remaining = list_profile_paths(self.profiles_directory)
+        self.profile_path = remaining[0]
+        self.profile = load_profile(self.profile_path)
+        try:
+            save_active_profile(self.profile_path, self.profile_state_path)
+        except OSError:
+            pass
+        self._refresh_profile_combo()
+        self.statusBar().showMessage(
+            f"配置方案已删除，已切换到：{self.profile.name}"
+        )
+
     def _confirm_discard_profile_changes(self) -> bool:
         """
         在离开当前 Profile 草稿前确认是否放弃修改。
@@ -925,6 +1085,17 @@ class MainWindow(FramelessMainWindow):
 
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.data_directory))):
             QMessageBox.warning(self, "无法打开目录", str(self.data_directory))
+
+    def _open_website(self, url: str) -> None:
+        """
+        使用系统默认浏览器打开关于页中的网站。
+
+        Args:
+            url (str): 需要打开的 HTTPS 网址。
+        """
+
+        if not QDesktopServices.openUrl(QUrl(url)):
+            QMessageBox.warning(self, "无法打开网站", url)
 
     def _previous_score(self) -> None:
         """选择歌单中的上一首曲谱。"""
@@ -1038,7 +1209,7 @@ class MainWindow(FramelessMainWindow):
 
     def _set_hotkey_editors(self, settings: AppSettings) -> None:
         """
-        将应用设置中的快捷键回填到三个编辑器。
+        将应用设置中的快捷键和拍数预设回填到编辑器。
 
         Args:
             settings (AppSettings): 快捷键来源设置。
@@ -1053,25 +1224,44 @@ class MainWindow(FramelessMainWindow):
         self.stop_hotkey_edit.setKeySequence(
             QKeySequence(settings.stop_hotkey.replace("Win+", "Meta+"))
         )
+        self.duration_hotkey_edit.setKeySequence(
+            QKeySequence(settings.duration_cycle_hotkey.replace("Win+", "Meta+"))
+        )
+        self.duration_presets_edit.setText(", ".join(settings.duration_presets))
+        self.default_duration_edit.setText(settings.default_note_duration)
 
     def _restore_default_hotkeys(self) -> None:
-        """恢复并立即保存 F8、F9、F10 默认全局快捷键。"""
+        """恢复并立即保存全部默认快捷键和编辑器拍数。"""
 
         defaults = AppSettings()
         self._set_hotkey_editors(defaults)
         self._save_hotkey_settings()
 
     def _save_hotkey_settings(self) -> None:
-        """校验、注册并持久化用户编辑的三个全局快捷键。"""
+        """校验、注册并持久化全局快捷键和编辑器设置。"""
 
         previous = self.app_settings
         try:
             record_hotkey = self._hotkey_text(self.record_hotkey_edit)
             play_hotkey = self._hotkey_text(self.play_hotkey_edit)
             stop_hotkey = self._hotkey_text(self.stop_hotkey_edit)
-            if len({record_hotkey, play_hotkey, stop_hotkey}) != 3:
-                raise HotkeyValidationError("三个全局快捷键不能重复")
-        except HotkeyValidationError as exc:
+            duration_hotkey = self._hotkey_text(self.duration_hotkey_edit)
+            if len({record_hotkey, play_hotkey, stop_hotkey, duration_hotkey}) != 4:
+                raise HotkeyValidationError("全局快捷键和编辑器快捷键不能重复")
+            raw_presets = self.duration_presets_edit.text().replace("，", ",").split(",")
+            duration_presets: list[str] = []
+            for raw in raw_presets:
+                if not raw.strip():
+                    continue
+                value = normalize_duration(raw)
+                if value not in duration_presets:
+                    duration_presets.append(value)
+            if not duration_presets:
+                raise ValueError("至少需要设置一个常用拍数")
+            default_duration = normalize_duration(self.default_duration_edit.text())
+            if default_duration not in duration_presets:
+                raise ValueError("默认新音符拍数必须包含在常用拍数中")
+        except (HotkeyValidationError, ValueError) as exc:
             QMessageBox.warning(self, "快捷键无效", str(exc))
             return
 
@@ -1094,6 +1284,9 @@ class MainWindow(FramelessMainWindow):
             record_hotkey=record_hotkey,
             play_hotkey=play_hotkey,
             stop_hotkey=stop_hotkey,
+            duration_cycle_hotkey=duration_hotkey,
+            duration_presets=tuple(duration_presets),
+            default_note_duration=default_duration,
         )
         try:
             save_app_settings(updated, self.app_settings_path)
@@ -1109,7 +1302,13 @@ class MainWindow(FramelessMainWindow):
         self.app_settings = updated
         self._set_hotkey_editors(updated)
         self._refresh_hotkey_labels()
-        self.statusBar().showMessage("全局快捷键已保存并立即生效")
+        for editor in self._editors:
+            editor.set_duration_settings(
+                updated.duration_presets,
+                updated.default_note_duration,
+                updated.duration_cycle_hotkey,
+            )
+        self.statusBar().showMessage("快捷键和编辑器拍数已保存并立即生效")
 
     def _refresh_hotkey_labels(self) -> None:
         """刷新主窗口和各悬浮层中的快捷键说明。"""
@@ -1202,7 +1401,19 @@ class MainWindow(FramelessMainWindow):
         self.playlist.blockSignals(True)
         self.playlist.clear()
         selected_row = 0
-        for row, entry in enumerate(self.library.entries()):
+        entries = list(self.library.entries())
+        if self.app_settings.score_sort_mode == "modified":
+            entries.sort(
+                key=lambda entry: (
+                    -entry.path.stat().st_mtime,
+                    entry.title.casefold(),
+                )
+            )
+        else:
+            entries.sort(
+                key=lambda entry: self.score_title_collator.sortKey(entry.title)
+            )
+        for row, entry in enumerate(entries):
             item = QListWidgetItem(entry.title)
             item.setData(Qt.ItemDataRole.UserRole, str(entry.path))
             self.playlist.addItem(item)
@@ -1212,6 +1423,39 @@ class MainWindow(FramelessMainWindow):
         self._filter_playlist(self.search_edit.text())
         if self.playlist.count():
             self.playlist.setCurrentRow(selected_row)
+
+    def _toggle_score_sort(self) -> None:
+        """切换、保存并立即应用曲谱列表排序方式。"""
+
+        previous = self.app_settings
+        mode = "title" if previous.score_sort_mode == "modified" else "modified"
+        updated = replace(previous, score_sort_mode=mode)
+        self.app_settings = updated
+        try:
+            save_app_settings(updated, self.app_settings_path)
+        except OSError as exc:
+            self.statusBar().showMessage(f"排序已应用，但无法保存设置：{exc}")
+        self._update_score_sort_button()
+        self._refresh_library()
+
+    def _update_score_sort_button(self) -> None:
+        """根据当前排序模式刷新图标、提示和无障碍名称。"""
+
+        by_time = self.app_settings.score_sort_mode == "modified"
+        current = (
+            "按时间（最新优先）"
+            if by_time
+            else "按名称（英文/拼音 A-Z）"
+        )
+        target = "按名称（英文/拼音）" if by_time else "按时间"
+        self.score_sort_button.setIcon(
+            painted_icon("sort_time" if by_time else "sort_title", 24)
+        )
+        self.score_sort_button.setToolTip("")
+        self.score_sort_button.setProperty(
+            "hoverHint", f"当前：{current}\n点击切换为{target}"
+        )
+        self.score_sort_button.setAccessibleName(f"曲谱排序：{current}")
 
     def _on_playlist_selection(
         self,
@@ -1630,15 +1874,13 @@ class MainWindow(FramelessMainWindow):
             self.playback_overlay.update_playback(ratio, self.current_note_text, paused)
 
     def _new_score(self) -> None:
-        """在曲谱库中创建新曲谱并打开独立编辑窗口。"""
+        """以内存草稿打开新曲谱，只有用户保存后才写入曲谱库。"""
 
-        try:
-            entry = self.library.create_score()
-        except OSError as exc:
-            QMessageBox.warning(self, "新建失败", str(exc))
-            return
-        self._refresh_library(entry.path)
-        self._open_editor(entry.path)
+        self._open_editor(
+            None,
+            initial_text=self.library.new_score_text(),
+            save_new=lambda text: self.library.save_score_text(text).path,
+        )
 
     def _import_score(self) -> None:
         """导入外部文本曲谱，或从 MIDI 提取单声部主旋律。"""
@@ -1709,17 +1951,32 @@ class MainWindow(FramelessMainWindow):
             return
         self._open_editor(self.current_entry.path)
 
-    def _open_editor(self, path: Path) -> None:
+    def _open_editor(
+        self,
+        path: Path | None,
+        initial_text: str | None = None,
+        save_new: Callable[[str], Path] | None = None,
+    ) -> None:
         """
         创建独立曲谱编辑窗口。
 
         Args:
-            path (Path): 待编辑曲谱路径。
+            path (Path | None): 待编辑曲谱路径；新建草稿时为空。
+            initial_text (str | None): 新建草稿的初始文本。
+            save_new (Callable[[str], Path] | None): 新建草稿保存回调。
         """
 
         try:
-            editor = ScoreEditorWindow(path, self)
-        except (OSError, UnicodeError) as exc:
+            editor = ScoreEditorWindow(
+                path,
+                self,
+                self.app_settings.duration_presets,
+                self.app_settings.default_note_duration,
+                self.app_settings.duration_cycle_hotkey,
+                initial_text,
+                save_new,
+            )
+        except (OSError, UnicodeError, ValueError) as exc:
             QMessageBox.warning(self, "打开失败", str(exc))
             return
         self._editors.append(editor)

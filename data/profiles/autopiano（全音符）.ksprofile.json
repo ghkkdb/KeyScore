@@ -1,0 +1,709 @@
+{
+  "version": 5,
+  "name": "autopiano（全音符）",
+  "mapping_mode": "direct_note",
+  "note_output_mode": "hold",
+  "zone_mode": "combination",
+  "initial_zone": "middle",
+  "key_hold_ms": 50,
+  "key_gap_ms": 10,
+  "zone_delay_ms": 35,
+  "zone_click_ms": 20,
+  "notes": {
+    "1": {
+      "kind": "keyboard",
+      "code": 30,
+      "label": "A",
+      "extended": false,
+      "modifiers": []
+    },
+    "2": {
+      "kind": "keyboard",
+      "code": 31,
+      "label": "S",
+      "extended": false,
+      "modifiers": []
+    },
+    "3": {
+      "kind": "keyboard",
+      "code": 32,
+      "label": "D",
+      "extended": false,
+      "modifiers": []
+    },
+    "4": {
+      "kind": "keyboard",
+      "code": 33,
+      "label": "F",
+      "extended": false,
+      "modifiers": []
+    },
+    "5": {
+      "kind": "keyboard",
+      "code": 34,
+      "label": "G",
+      "extended": false,
+      "modifiers": []
+    },
+    "6": {
+      "kind": "keyboard",
+      "code": 35,
+      "label": "H",
+      "extended": false,
+      "modifiers": []
+    },
+    "7": {
+      "kind": "keyboard",
+      "code": 36,
+      "label": "J",
+      "extended": false,
+      "modifiers": []
+    }
+  },
+  "zones": {
+    "low": {
+      "kind": "mouse",
+      "code": 1,
+      "label": "鼠标左键",
+      "extended": false,
+      "modifiers": []
+    },
+    "high": {
+      "kind": "mouse",
+      "code": 2,
+      "label": "鼠标右键",
+      "extended": false,
+      "modifiers": []
+    }
+  },
+  "semitone": {
+    "kind": "mouse",
+    "code": 3,
+    "label": "鼠标中键",
+    "extended": false,
+    "modifiers": []
+  },
+  "direct_notes": {
+    "low:0:1": {
+      "kind": "keyboard",
+      "code": 9,
+      "label": "8",
+      "extended": false,
+      "modifiers": []
+    },
+    "low:0:2": {
+      "kind": "keyboard",
+      "code": 10,
+      "label": "9",
+      "extended": false,
+      "modifiers": []
+    },
+    "low:0:3": {
+      "kind": "keyboard",
+      "code": 11,
+      "label": "0",
+      "extended": false,
+      "modifiers": []
+    },
+    "low:0:4": {
+      "kind": "keyboard",
+      "code": 16,
+      "label": "Q",
+      "extended": false,
+      "modifiers": []
+    },
+    "low:0:5": {
+      "kind": "keyboard",
+      "code": 17,
+      "label": "W",
+      "extended": false,
+      "modifiers": []
+    },
+    "low:0:6": {
+      "kind": "keyboard",
+      "code": 18,
+      "label": "E",
+      "extended": false,
+      "modifiers": []
+    },
+    "low:0:7": {
+      "kind": "keyboard",
+      "code": 19,
+      "label": "R",
+      "extended": false,
+      "modifiers": []
+    },
+    "middle:0:1": {
+      "kind": "keyboard",
+      "code": 20,
+      "label": "T",
+      "extended": false,
+      "modifiers": []
+    },
+    "middle:0:2": {
+      "kind": "keyboard",
+      "code": 21,
+      "label": "Y",
+      "extended": false,
+      "modifiers": []
+    },
+    "middle:0:3": {
+      "kind": "keyboard",
+      "code": 22,
+      "label": "U",
+      "extended": false,
+      "modifiers": []
+    },
+    "middle:0:4": {
+      "kind": "keyboard",
+      "code": 23,
+      "label": "I",
+      "extended": false,
+      "modifiers": []
+    },
+    "middle:0:5": {
+      "kind": "keyboard",
+      "code": 24,
+      "label": "O",
+      "extended": false,
+      "modifiers": []
+    },
+    "middle:0:6": {
+      "kind": "keyboard",
+      "code": 25,
+      "label": "P",
+      "extended": false,
+      "modifiers": []
+    },
+    "middle:0:7": {
+      "kind": "keyboard",
+      "code": 30,
+      "label": "A",
+      "extended": false,
+      "modifiers": []
+    },
+    "high:0:1": {
+      "kind": "keyboard",
+      "code": 31,
+      "label": "S",
+      "extended": false,
+      "modifiers": []
+    },
+    "high:0:2": {
+      "kind": "keyboard",
+      "code": 32,
+      "label": "D",
+      "extended": false,
+      "modifiers": []
+    },
+    "high:0:3": {
+      "kind": "keyboard",
+      "code": 33,
+      "label": "F",
+      "extended": false,
+      "modifiers": []
+    },
+    "high:0:4": {
+      "kind": "keyboard",
+      "code": 34,
+      "label": "G",
+      "extended": false,
+      "modifiers": []
+    },
+    "high:0:5": {
+      "kind": "keyboard",
+      "code": 35,
+      "label": "H",
+      "extended": false,
+      "modifiers": []
+    },
+    "high:0:6": {
+      "kind": "keyboard",
+      "code": 36,
+      "label": "J",
+      "extended": false,
+      "modifiers": []
+    },
+    "high:0:7": {
+      "kind": "keyboard",
+      "code": 37,
+      "label": "K",
+      "extended": false,
+      "modifiers": []
+    },
+    "lowest:0:1": {
+      "kind": "keyboard",
+      "code": 2,
+      "label": "1",
+      "extended": false,
+      "modifiers": []
+    },
+    "lowest:1:1": {
+      "kind": "keyboard",
+      "code": 2,
+      "label": "!",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "lowest:0:2": {
+      "kind": "keyboard",
+      "code": 3,
+      "label": "2",
+      "extended": false,
+      "modifiers": []
+    },
+    "lowest:0:3": {
+      "kind": "keyboard",
+      "code": 4,
+      "label": "3",
+      "extended": false,
+      "modifiers": []
+    },
+    "lowest:0:4": {
+      "kind": "keyboard",
+      "code": 5,
+      "label": "4",
+      "extended": false,
+      "modifiers": []
+    },
+    "lowest:0:5": {
+      "kind": "keyboard",
+      "code": 6,
+      "label": "5",
+      "extended": false,
+      "modifiers": []
+    },
+    "lowest:0:6": {
+      "kind": "keyboard",
+      "code": 7,
+      "label": "6",
+      "extended": false,
+      "modifiers": []
+    },
+    "lowest:0:7": {
+      "kind": "keyboard",
+      "code": 8,
+      "label": "7",
+      "extended": false,
+      "modifiers": []
+    },
+    "lowest:1:2": {
+      "kind": "keyboard",
+      "code": 3,
+      "label": "@",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "lowest:1:4": {
+      "kind": "keyboard",
+      "code": 5,
+      "label": "$",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "lowest:1:5": {
+      "kind": "keyboard",
+      "code": 6,
+      "label": "%",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "lowest:1:6": {
+      "kind": "keyboard",
+      "code": 7,
+      "label": "^",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "low:1:1": {
+      "kind": "keyboard",
+      "code": 9,
+      "label": "*",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "low:1:2": {
+      "kind": "keyboard",
+      "code": 10,
+      "label": "(",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "low:1:4": {
+      "kind": "keyboard",
+      "code": 16,
+      "label": "Q",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "low:1:5": {
+      "kind": "keyboard",
+      "code": 17,
+      "label": "W",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "low:1:6": {
+      "kind": "keyboard",
+      "code": 18,
+      "label": "E",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "middle:1:1": {
+      "kind": "keyboard",
+      "code": 20,
+      "label": "T",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "middle:1:2": {
+      "kind": "keyboard",
+      "code": 21,
+      "label": "Y",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "middle:1:4": {
+      "kind": "keyboard",
+      "code": 23,
+      "label": "I",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "middle:1:5": {
+      "kind": "keyboard",
+      "code": 24,
+      "label": "O",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "middle:1:6": {
+      "kind": "keyboard",
+      "code": 25,
+      "label": "P",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "highest:0:1": {
+      "kind": "keyboard",
+      "code": 38,
+      "label": "L",
+      "extended": false,
+      "modifiers": []
+    },
+    "highest:0:2": {
+      "kind": "keyboard",
+      "code": 44,
+      "label": "Z",
+      "extended": false,
+      "modifiers": []
+    },
+    "highest:0:3": {
+      "kind": "keyboard",
+      "code": 45,
+      "label": "X",
+      "extended": false,
+      "modifiers": []
+    },
+    "highest:0:4": {
+      "kind": "keyboard",
+      "code": 46,
+      "label": "C",
+      "extended": false,
+      "modifiers": []
+    },
+    "highest:0:5": {
+      "kind": "keyboard",
+      "code": 47,
+      "label": "V",
+      "extended": false,
+      "modifiers": []
+    },
+    "highest:0:6": {
+      "kind": "keyboard",
+      "code": 48,
+      "label": "B",
+      "extended": false,
+      "modifiers": []
+    },
+    "highest:0:7": {
+      "kind": "keyboard",
+      "code": 49,
+      "label": "N",
+      "extended": false,
+      "modifiers": []
+    },
+    "high:1:1": {
+      "kind": "keyboard",
+      "code": 31,
+      "label": "S",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "high:1:2": {
+      "kind": "keyboard",
+      "code": 32,
+      "label": "D",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "high:1:4": {
+      "kind": "keyboard",
+      "code": 34,
+      "label": "G",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "high:1:5": {
+      "kind": "keyboard",
+      "code": 35,
+      "label": "H",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "high:1:6": {
+      "kind": "keyboard",
+      "code": 36,
+      "label": "J",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "highest:1:1": {
+      "kind": "keyboard",
+      "code": 38,
+      "label": "L",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "highest:1:2": {
+      "kind": "keyboard",
+      "code": 44,
+      "label": "Z",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "highest:1:4": {
+      "kind": "keyboard",
+      "code": 46,
+      "label": "C",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "highest:1:5": {
+      "kind": "keyboard",
+      "code": 47,
+      "label": "V",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    },
+    "highest:1:6": {
+      "kind": "keyboard",
+      "code": 48,
+      "label": "B",
+      "extended": false,
+      "modifiers": [
+        {
+          "kind": "keyboard",
+          "code": 42,
+          "label": "Shift",
+          "extended": false,
+          "modifiers": []
+        }
+      ]
+    }
+  },
+  "metadata": {}
+}

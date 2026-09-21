@@ -105,12 +105,24 @@ class ScoreLibrary:
         """
 
         path = self._unique_path(title)
-        path.write_text(
-            f"@title {title}\n@bpm 100\n@beat 4/4\n@section_gap 2\n\n"
-            "1 2 3 4 | 5 6 7 H1 |\n---\n1 2 3 4 |\n",
-            encoding="utf-8",
-        )
+        path.write_text(self.new_score_text(title), encoding="utf-8")
         return ScoreEntry(title, path)
+
+    @staticmethod
+    def new_score_text(title: str = "未命名曲谱") -> str:
+        """
+        返回尚未写入曲谱库的新建草稿内容。
+
+        Args:
+            title (str): 初始曲名。
+
+        Returns:
+            str: 仅包含一个中音 Do 的完整曲谱文本。
+        """
+
+        return (
+            f"@title {title}\n@bpm 100\n@beat 4/4\n@section_gap 2\n\n1\n"
+        )
 
     def save_score_text(self, text: str) -> ScoreEntry:
         """

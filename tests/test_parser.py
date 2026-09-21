@@ -46,13 +46,28 @@ class ScoreParserTests(unittest.TestCase):
             parse_score("7 8:2")
 
     def test_sharp_marks_semitone_modifier(self) -> None:
-        """`#` 前缀应记录为半音修饰而不改变基础音符。"""
+        """独立黑键保留升号，升 Si 则规范为高一音区 Do。"""
 
         score = parse_score("#1 #H7:0.5")
         self.assertTrue(score.notes[0].is_semitone)
         self.assertEqual(score.notes[0].degree, 1)
-        self.assertTrue(score.notes[1].is_semitone)
-        self.assertEqual(score.notes[1].octave, Octave.HIGH)
+        self.assertFalse(score.notes[1].is_semitone)
+        self.assertEqual(score.notes[1].degree, 1)
+        self.assertEqual(score.notes[1].octave, Octave.HIGHEST)
+
+    def test_sharp_mi_normalizes_to_fa(self) -> None:
+        """升 Mi 没有独立黑键，应规范为同音区 Fa。"""
+
+        score = parse_score("#3")
+
+        self.assertEqual(score.notes[0].degree, 4)
+        self.assertFalse(score.notes[0].is_semitone)
+
+    def test_sharp_highest_si_is_out_of_range(self) -> None:
+        """升倍高音 Si 超出五音区时应明确报错。"""
+
+        with self.assertRaises(ScoreParseError):
+            parse_score("#HH7")
 
     def test_parse_five_octave_prefixes(self) -> None:
         """双 L 和双 H 前缀应分别表示倍低音与倍高音。"""

@@ -152,6 +152,17 @@ def painted_icon(name: str, size: int = 32) -> QIcon:
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor("#F04452"))
             painter.drawEllipse(int(9 * unit), int(9 * unit), int(14 * unit), int(14 * unit))
+        elif name == "sort_time":
+            painter.drawEllipse(int(6 * unit), int(6 * unit), int(20 * unit), int(20 * unit))
+            painter.drawLine(int(16 * unit), int(10 * unit), int(16 * unit), int(17 * unit))
+            painter.drawLine(int(16 * unit), int(17 * unit), int(21 * unit), int(20 * unit))
+        elif name == "sort_title":
+            painter.drawLine(int(7 * unit), int(9 * unit), int(20 * unit), int(9 * unit))
+            painter.drawLine(int(7 * unit), int(15 * unit), int(17 * unit), int(15 * unit))
+            painter.drawLine(int(7 * unit), int(21 * unit), int(14 * unit), int(21 * unit))
+            painter.drawLine(int(24 * unit), int(8 * unit), int(24 * unit), int(23 * unit))
+            painter.drawLine(int(20 * unit), int(19 * unit), int(24 * unit), int(23 * unit))
+            painter.drawLine(int(28 * unit), int(19 * unit), int(24 * unit), int(23 * unit))
         painter.end()
         icon.addPixmap(pixmap, mode, state)
     return icon

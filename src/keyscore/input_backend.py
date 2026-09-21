@@ -8,7 +8,7 @@ import threading
 from ctypes import wintypes
 from typing import Protocol
 
-from .models import ActionType, Binding, BindingKind, TimedInputEvent
+from .models import ActionType, Binding, BindingKind, TimedInputEvent, binding_components
 
 
 class InputBackend(Protocol):
@@ -103,7 +103,7 @@ class WindowsSendInputBackend:
         if sys.platform != "win32":
             raise OSError("WindowsSendInputBackend 仅支持 Windows")
         self._user32 = ctypes.WinDLL("user32", use_last_error=True)
-        self._pressed: set[Binding] = set()
+        self._pressed: dict[Binding, int] = {}
         self._lock = threading.RLock()
 
     def _send(self, input_value: "_INPUT") -> None:
@@ -169,21 +169,31 @@ class WindowsSendInputBackend:
             event (TimedInputEvent): 待发送事件。
         """
 
-        pressed = event.action is ActionType.PRESS
         with self._lock:
-            self._send_binding(event.binding, pressed)
-            if pressed:
-                self._pressed.add(event.binding)
-            else:
-                self._pressed.discard(event.binding)
+            components = binding_components(event.binding)
+            if event.action is ActionType.PRESS:
+                for binding in components:
+                    count = self._pressed.get(binding, 0)
+                    if count == 0:
+                        self._send_binding(binding, True)
+                    self._pressed[binding] = count + 1
+                return
+            for binding in reversed(components):
+                count = self._pressed.get(binding, 0)
+                if count <= 1:
+                    if count:
+                        self._send_binding(binding, False)
+                    self._pressed.pop(binding, None)
+                else:
+                    self._pressed[binding] = count - 1
 
     def release_all(self) -> None:
         """释放所有由本后端记录为已按下的键鼠按键。"""
 
         with self._lock:
-            bindings = tuple(self._pressed)
+            bindings = tuple(reversed(self._pressed))
             for binding in bindings:
                 try:
                     self._send_binding(binding, False)
                 finally:
-                    self._pressed.discard(binding)
+                    self._pressed.pop(binding, None)

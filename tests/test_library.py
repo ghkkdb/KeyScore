@@ -12,8 +12,10 @@ from keyscore.models import (
     BindingKind,
     MappingMode,
     NoteOutputMode,
+    Octave,
     default_profile,
 )
+from keyscore.parser import parse_score
 from keyscore.profile_store import (
     import_profile,
     list_profile_paths,
@@ -43,6 +45,15 @@ class LibraryTests(unittest.TestCase):
             self.assertIn(created.path, paths)
             self.assertIn(imported.path, paths)
             self.assertEqual(imported.path.stem, "导入曲")
+
+    def test_new_score_template_contains_one_middle_note(self) -> None:
+        """新建草稿默认只包含一个中音 Do。"""
+
+        score = parse_score(ScoreLibrary.new_score_text())
+
+        self.assertEqual(len(score.notes), 1)
+        self.assertEqual(score.notes[0].degree, 1)
+        self.assertEqual(score.notes[0].octave, Octave.MIDDLE)
 
     def test_rename_score_file_uses_title_and_preserves_duplicates(self) -> None:
         """保存曲谱时应按标题改名，重名时不得覆盖已有文件。"""
@@ -85,6 +96,23 @@ class LibraryTests(unittest.TestCase):
             restored = load_profile(path)
             self.assertEqual(restored.note_bindings[1], profile.note_bindings[1])
 
+    def test_profile_round_trip_keeps_combination_and_modifier_key(self) -> None:
+        """组合键和单独修饰键应通过新版 Profile 完整持久化。"""
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "combo.ksprofile.json"
+            profile = default_profile()
+            shift = Binding(BindingKind.KEYBOARD, 0x2A, "Shift")
+            profile.note_bindings[1] = Binding(
+                BindingKind.KEYBOARD, 0x1E, "A", modifiers=(shift,)
+            )
+            profile.note_bindings[2] = shift
+            save_profile(profile, path)
+            restored = load_profile(path)
+
+        self.assertEqual(restored.note_bindings[1], profile.note_bindings[1])
+        self.assertEqual(restored.note_bindings[2], shift)
+
     def test_profile_round_trip_keeps_mapping_mode_and_direct_notes(self) -> None:
         """新版 Profile 应保留映射模式和直接音符映射。"""
 
@@ -124,7 +152,7 @@ class LibraryTests(unittest.TestCase):
                 restored.direct_note_bindings,
                 profile.direct_note_bindings,
             )
-            self.assertIn('"version": 4', path.read_text(encoding="utf-8"))
+            self.assertIn('"version": 5', path.read_text(encoding="utf-8"))
 
     def test_legacy_profile_defaults_to_tap_output(self) -> None:
         """缺少输出方式字段的旧 Profile 应保持原有短按行为。"""

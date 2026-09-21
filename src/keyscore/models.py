@@ -56,12 +56,42 @@ class ActionType(str, Enum):
 
 @dataclass(frozen=True)
 class Binding:
-    """描述一个键盘扫描码或鼠标按键绑定。"""
+    """描述一个键盘或鼠标主键，以及按下主键前需要保持的修饰键。"""
 
     kind: BindingKind
     code: int
     label: str
     extended: bool = False
+    modifiers: tuple[Binding, ...] = ()
+
+
+def binding_label(binding: Binding) -> str:
+    """
+    返回单键或组合键的完整显示名称。
+
+    Args:
+        binding (Binding): 待显示的按键绑定。
+
+    Returns:
+        str: 例如 ``A``、``Shift`` 或 ``Ctrl+Shift+A``。
+    """
+
+    return "+".join((*[item.label for item in binding.modifiers], binding.label))
+
+
+def binding_components(binding: Binding) -> tuple[Binding, ...]:
+    """
+    返回组合键按下时使用的全部原子按键。
+
+    Args:
+        binding (Binding): 单键或组合键。
+
+    Returns:
+        tuple[Binding, ...]: 修饰键在前、主键在后的原子按键。
+    """
+
+    primary = Binding(binding.kind, binding.code, binding.label, binding.extended)
+    return (*binding.modifiers, primary)
 
 
 @dataclass(frozen=True)
@@ -138,7 +168,45 @@ def note_binding_key(note: NoteEvent) -> str:
         str: 由音区、半音状态和音级构成的键名。
     """
 
-    return f"{note.octave.value}:{int(note.is_semitone)}:{note.degree}"
+    degree, octave, is_semitone = normalize_pitch(
+        note.degree, note.octave, note.is_semitone
+    )
+    return f"{octave.value}:{int(is_semitone)}:{degree}"
+
+
+def normalize_pitch(
+    degree: int, octave: Octave, is_semitone: bool
+) -> tuple[int, Octave, bool]:
+    """
+    将没有独立黑键的升 Mi、升 Si 规范化为自然音。
+
+    Args:
+        degree (int): 简谱音级 1～7。
+        octave (Octave): 当前音区。
+        is_semitone (bool): 是否带升号。
+
+    Returns:
+        tuple[int, Octave, bool]: 规范化后的音级、音区和升号状态。
+
+    Raises:
+        ValueError: 升倍高音 Si 超出五音区范围时抛出。
+    """
+
+    if not is_semitone or degree not in {3, 7}:
+        return degree, octave, is_semitone
+    if degree == 3:
+        return 4, octave, False
+    octaves = (
+        Octave.LOWEST,
+        Octave.LOW,
+        Octave.MIDDLE,
+        Octave.HIGH,
+        Octave.HIGHEST,
+    )
+    index = octaves.index(octave)
+    if index + 1 >= len(octaves):
+        raise ValueError("升倍高音 Si 超出 KeyScore 五音区范围")
+    return 1, octaves[index + 1], False
 
 
 def default_profile() -> GameProfile:

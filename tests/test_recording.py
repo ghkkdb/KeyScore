@@ -49,6 +49,26 @@ class RecordingDecoderTests(unittest.TestCase):
         assert isinstance(completed, RecordedNote)
         self.assertEqual(completed.end_ms - completed.start_ms, 100.0)
 
+    def test_direct_combination_mapping_decodes_after_primary_press(self) -> None:
+        """直接映射组合键应在修饰键保持且主键按下后生成音符。"""
+
+        profile = default_profile()
+        profile.mapping_mode = MappingMode.DIRECT_NOTE
+        shift = Binding(BindingKind.KEYBOARD, 0x2A, "Shift")
+        combination = Binding(
+            BindingKind.KEYBOARD, 0x1E, "A", modifiers=(shift,)
+        )
+        profile.direct_note_bindings = {"middle:0:1": combination}
+        decoder = ProfileInputDecoder(profile)
+
+        self.assertIsNone(decoder.feed(shift, True, 0.0))
+        started = decoder.feed(Binding(BindingKind.KEYBOARD, 0x1E, "A"), True, 1.0)
+        self.assertEqual(started, DecodedNoteStart(1, Octave.MIDDLE, False))
+        finished = decoder.feed(
+            Binding(BindingKind.KEYBOARD, 0x1E, "A"), False, 10.0
+        )
+        self.assertIsInstance(finished, RecordedNote)
+
     def test_direct_mapping_rejects_duplicate_binding(self) -> None:
         """同一物理键对应多个音符时必须阻止录制。"""
 

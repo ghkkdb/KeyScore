@@ -4,11 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..models import Binding, BindingKind, GameProfile, MappingMode, Octave
+from ..models import (
+    Binding,
+    BindingKind,
+    GameProfile,
+    MappingMode,
+    Octave,
+    binding_components,
+)
 from .models import RecordedNote
 
 
-BindingIdentity = tuple[BindingKind, int, bool]
+AtomicIdentity = tuple[BindingKind, int, bool]
+BindingIdentity = tuple[AtomicIdentity, ...]
 
 
 class RecordingDecodeError(ValueError):
@@ -42,10 +50,12 @@ def binding_identity(binding: Binding) -> BindingIdentity:
         binding (Binding): 键盘或鼠标绑定。
 
     Returns:
-        BindingIdentity: 设备类型、代码和扩展键标记。
+        BindingIdentity: 按下顺序排列的原子按键标识。
     """
 
-    return binding.kind, binding.code, binding.extended
+    return tuple(
+        (item.kind, item.code, item.extended) for item in binding_components(binding)
+    )
 
 
 def recording_profile_conflicts(profile: GameProfile) -> tuple[str, ...]:
@@ -88,6 +98,14 @@ def recording_profile_conflicts(profile: GameProfile) -> tuple[str, ...]:
     for descriptions in usage.values():
         if len(descriptions) > 1:
             conflicts.append("、".join(descriptions))
+    if profile.mapping_mode is not MappingMode.DEGREE_MODIFIER:
+        direct_items = _active_direct_note_items(profile)
+        for index, (left_key, left_binding) in enumerate(direct_items):
+            left = set(binding_identity(left_binding))
+            for right_key, right_binding in direct_items[index + 1 :]:
+                right = set(binding_identity(right_binding))
+                if left != right and (left < right or right < left):
+                    conflicts.append(f"{left_key}、{right_key}（组合包含关系）")
     return tuple(conflicts)
 
 
@@ -118,9 +136,10 @@ def recording_reserved_shortcuts(
     return tuple(
         sorted(
             {
-                reserved[binding.code]
+                reserved[item.code]
                 for binding in bindings
-                if binding.kind is BindingKind.KEYBOARD and binding.code in reserved
+                for item in binding_components(binding)
+                if item.kind is BindingKind.KEYBOARD and item.code in reserved
             }
         )
     )
@@ -160,7 +179,9 @@ def _active_direct_note_items(profile: GameProfile) -> tuple[tuple[str, Binding]
 
     items: list[tuple[str, Binding]] = []
     for key, binding in profile.direct_note_bindings.items():
-        _degree, octave, is_semitone = _pitch_from_key(key)
+        degree, octave, is_semitone = _pitch_from_key(key)
+        if is_semitone and degree in {3, 7}:
+            continue
         if profile.mapping_mode is MappingMode.ROW_OCTAVE:
             if octave not in {Octave.LOW, Octave.MIDDLE, Octave.HIGH} or is_semitone:
                 continue
@@ -188,7 +209,7 @@ class ProfileInputDecoder:
         if conflicts:
             raise RecordingDecodeError(f"按键映射存在录制歧义：{'; '.join(conflicts)}")
         self._profile = profile
-        self._pressed: set[BindingIdentity] = set()
+        self._pressed: set[AtomicIdentity] = set()
         self._active: dict[BindingIdentity, _ActiveNote] = {}
         self._degree_by_binding = {
             binding_identity(binding): degree
@@ -223,22 +244,27 @@ class ProfileInputDecoder:
             RecordingDecodeError: 同时按下互斥音区修饰键时抛出。
         """
 
-        identity = binding_identity(binding)
+        identity = binding_identity(binding)[-1]
         if pressed:
             if identity in self._pressed:
                 return None
             self._pressed.add(identity)
-            pitch = self._decode_press(identity)
-            if pitch is None:
+            decoded = self._decode_press(identity)
+            if decoded is None:
                 return None
+            pitch, trigger = decoded
             degree, octave, is_semitone = pitch
-            self._active[identity] = _ActiveNote(
+            self._active[trigger] = _ActiveNote(
                 timestamp_ms, degree, octave, is_semitone
             )
             return DecodedNoteStart(degree, octave, is_semitone)
 
         self._pressed.discard(identity)
-        active = self._active.pop(identity, None)
+        trigger = next(
+            (key for key in self._active if identity in key),
+            None,
+        )
+        active = self._active.pop(trigger, None) if trigger is not None else None
         if active is None:
             return None
         return RecordedNote(
@@ -275,33 +301,47 @@ class ProfileInputDecoder:
         return notes
 
     def _decode_press(
-        self, identity: BindingIdentity
-    ) -> tuple[int, Octave, bool] | None:
+        self, identity: AtomicIdentity
+    ) -> tuple[tuple[int, Octave, bool], BindingIdentity] | None:
         """
         根据当前修饰键状态解释一次按下。
 
         Args:
-            identity (BindingIdentity): 被按下的物理键标识。
+            identity (AtomicIdentity): 被按下的物理键标识。
 
         Returns:
-            tuple[int, Octave, bool] | None: 语义音符，修饰键或无关键返回空。
+            tuple[tuple[int, Octave, bool], BindingIdentity] | None:
+                语义音符及其完整触发组合；修饰键或无关键返回空。
 
         Raises:
             RecordingDecodeError: 高低音修饰键同时处于按下状态时抛出。
         """
 
         if self._profile.mapping_mode is not MappingMode.DEGREE_MODIFIER:
-            return self._pitch_by_binding.get(identity)
-
-        degree = self._degree_by_binding.get(identity)
-        if degree is None:
+            for trigger, pitch in self._pitch_by_binding.items():
+                if identity == trigger[-1] and set(trigger).issubset(self._pressed):
+                    return pitch, trigger
             return None
+
+        trigger = next(
+            (
+                key
+                for key in self._degree_by_binding
+                if identity == key[-1] and set(key).issubset(self._pressed)
+            ),
+            None,
+        )
+        if trigger is None:
+            return None
+        degree = self._degree_by_binding[trigger]
         low = self._profile.zone_bindings.get(Octave.LOW)
         high = self._profile.zone_bindings.get(Octave.HIGH)
-        low_pressed = low is not None and binding_identity(low) in self._pressed
-        high_pressed = high is not None and binding_identity(high) in self._pressed
+        low_pressed = low is not None and set(binding_identity(low)).issubset(self._pressed)
+        high_pressed = high is not None and set(binding_identity(high)).issubset(self._pressed)
         if low_pressed and high_pressed:
             raise RecordingDecodeError("低音和高音修饰键不能同时按下")
         octave = Octave.LOW if low_pressed else Octave.HIGH if high_pressed else Octave.MIDDLE
-        semitone = binding_identity(self._profile.semitone_binding) in self._pressed
-        return degree, octave, semitone
+        semitone = set(binding_identity(self._profile.semitone_binding)).issubset(
+            self._pressed
+        )
+        return (degree, octave, semitone), trigger

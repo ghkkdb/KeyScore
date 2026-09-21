@@ -20,6 +20,9 @@ class AppSettingsTests(TestCase):
         self.assertEqual(settings.record_hotkey, "F8")
         self.assertEqual(settings.play_hotkey, "F9")
         self.assertEqual(settings.stop_hotkey, "F10")
+        self.assertEqual(settings.duration_cycle_hotkey, "D")
+        self.assertIn("3/4", settings.duration_presets)
+        self.assertEqual(settings.default_note_duration, "1")
         self.assertTrue(settings.show_playback_overlay)
         self.assertEqual(settings.countdown_seconds, 3)
         self.assertTrue(settings.show_countdown_overlay)
@@ -44,6 +47,10 @@ class AppSettingsTests(TestCase):
                 record_hotkey="Ctrl+F8",
                 play_hotkey="Alt+P",
                 stop_hotkey="Shift+F10",
+                duration_cycle_hotkey="Ctrl+D",
+                duration_presets=("1/8", "1/3", "3/4", "2"),
+                default_note_duration="3/4",
+                score_sort_mode="title",
                 show_playback_overlay=False,
                 countdown_seconds=6,
                 show_countdown_overlay=False,

@@ -296,6 +296,28 @@ class PianoRollTests(unittest.TestCase):
                 window.editor.document().setModified(False)
                 window.close()
 
+    def test_custom_duration_presets_cycle_in_user_order(self) -> None:
+        """编辑器应加载用户拍数，并按用户顺序循环切换。"""
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "test.txt"
+            path.write_text("@title 拍数测试\n1", encoding="utf-8")
+            window = ScoreEditorWindow(
+                path,
+                duration_presets=("1/8", "3/4", "3"),
+                default_note_duration="3/4",
+                duration_cycle_hotkey="D",
+            )
+            try:
+                self.assertEqual(window.duration_combo.currentData(), "3/4")
+                window._cycle_note_duration()
+                self.assertEqual(window.duration_combo.currentData(), "3")
+                window._cycle_note_duration()
+                self.assertEqual(window.duration_combo.currentData(), "1/8")
+            finally:
+                window.editor.document().setModified(False)
+                window.close()
+
 
 if __name__ == "__main__":
     unittest.main()
