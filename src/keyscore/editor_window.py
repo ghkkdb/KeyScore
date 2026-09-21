@@ -42,6 +42,7 @@ class ScoreEditorWindow(QMainWindow):
         duration_presets: tuple[str, ...] = ("1/4", "1/2", "3/4", "1", "2", "4"),
         default_note_duration: str = "1",
         duration_cycle_hotkey: str = "D",
+        duration_reverse_hotkey: str = "A",
         initial_text: str | None = None,
         save_new: Callable[[str], Path] | None = None,
     ) -> None:
@@ -54,6 +55,7 @@ class ScoreEditorWindow(QMainWindow):
             duration_presets (tuple[str, ...]): 新音符常用拍数。
             default_note_duration (str): 打开编辑器时默认选中的拍数。
             duration_cycle_hotkey (str): 循环切换拍数的窗口快捷键。
+            duration_reverse_hotkey (str): 反向循环切换拍数的窗口快捷键。
             initial_text (str | None): 新建草稿使用的初始曲谱文本。
             save_new (Callable[[str], Path] | None): 保存新建草稿的回调。
         """
@@ -225,6 +227,19 @@ class ScoreEditorWindow(QMainWindow):
         )
         self.duration_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
         self.duration_shortcut.activated.connect(self._cycle_note_duration)
+        self.duration_reverse_shortcut = QShortcut(
+            QKeySequence(duration_reverse_hotkey.replace("Win+", "Meta+")), self
+        )
+        self.duration_reverse_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.duration_reverse_shortcut.activated.connect(
+            self._cycle_note_duration_reverse
+        )
+        self.undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
+        self.undo_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.undo_shortcut.activated.connect(self.roll_editor.undo_stack.undo)
+        self.redo_shortcut = QShortcut(QKeySequence.StandardKey.Redo, self)
+        self.redo_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.redo_shortcut.activated.connect(self.roll_editor.undo_stack.redo)
         try:
             self.roll_editor.set_score_document(document_from_text(source_text))
         except ScoreParseError:
@@ -239,6 +254,7 @@ class ScoreEditorWindow(QMainWindow):
         presets: tuple[str, ...],
         default_duration: str,
         hotkey: str,
+        reverse_hotkey: str,
     ) -> None:
         """
         刷新拍数预设和编辑器快捷键，并尽量保留当前选择。
@@ -247,6 +263,7 @@ class ScoreEditorWindow(QMainWindow):
             presets (tuple[str, ...]): 规范化后的常用拍数。
             default_duration (str): 当前选择失效时采用的默认拍数。
             hotkey (str): 循环切换拍数的快捷键。
+            reverse_hotkey (str): 反向循环切换拍数的快捷键。
         """
 
         current = str(self.duration_combo.currentData() or default_duration)
@@ -258,14 +275,32 @@ class ScoreEditorWindow(QMainWindow):
         self.duration_combo.setCurrentIndex(max(0, self.duration_combo.findData(selected)))
         self.duration_combo.blockSignals(False)
         self.duration_shortcut.setKey(QKeySequence(hotkey.replace("Win+", "Meta+")))
+        self.duration_reverse_shortcut.setKey(
+            QKeySequence(reverse_hotkey.replace("Win+", "Meta+"))
+        )
         self._apply_roll_duration()
 
     def _cycle_note_duration(self) -> None:
         """循环切换到用户拍数列表中的下一项。"""
 
+        self._cycle_note_duration_by(1)
+
+    def _cycle_note_duration_reverse(self) -> None:
+        """反向循环切换到用户拍数列表中的上一项。"""
+
+        self._cycle_note_duration_by(-1)
+
+    def _cycle_note_duration_by(self, step: int) -> None:
+        """
+        按指定方向循环切换新音符拍数。
+
+        Args:
+            step (int): 循环方向；正数向后，负数向前。
+        """
+
         if self.editor_tabs.currentIndex() != 0 or self.duration_combo.count() == 0:
             return
-        next_index = (self.duration_combo.currentIndex() + 1) % self.duration_combo.count()
+        next_index = (self.duration_combo.currentIndex() + step) % self.duration_combo.count()
         self.duration_combo.setCurrentIndex(next_index)
         self.validation_label.setText(
             f"新音符拍数：{self.duration_combo.currentData()} 拍"
@@ -360,6 +395,9 @@ class ScoreEditorWindow(QMainWindow):
         """
 
         self.duration_shortcut.setEnabled(index == 0)
+        self.duration_reverse_shortcut.setEnabled(index == 0)
+        self.undo_shortcut.setEnabled(index == 0)
+        self.redo_shortcut.setEnabled(index == 0)
         if self._syncing_views:
             return
         if index == 1:
@@ -376,6 +414,9 @@ class ScoreEditorWindow(QMainWindow):
             self.editor_tabs.setCurrentIndex(1)
             self.editor_tabs.blockSignals(False)
             self.duration_shortcut.setEnabled(False)
+            self.duration_reverse_shortcut.setEnabled(False)
+            self.undo_shortcut.setEnabled(False)
+            self.redo_shortcut.setEnabled(False)
             self.editor.setFocus()
             return
         self.roll_editor.set_score_document(document)

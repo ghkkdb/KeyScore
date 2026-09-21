@@ -225,6 +225,47 @@ def _unit_text(token: str, duration: Fraction) -> str:
     return token if duration == 1 else f"{token}:{_duration_text(duration)}"
 
 
+def _measure_beats(beat: str) -> Fraction:
+    """
+    将拍号换算成以四分音符为单位的小节拍数。
+
+    Args:
+        beat (str): 曲谱拍号，例如 `4/4` 或 `6/8`。
+
+    Returns:
+        Fraction: 一个小节占用的四分音符拍数。
+    """
+
+    numerator, denominator = (int(part) for part in beat.split("/", maxsplit=1))
+    return Fraction(numerator * 4, denominator)
+
+
+def _format_body(tokens: list[str]) -> str:
+    """
+    将含小节线的正文词元排版为每四小节一行。
+
+    Args:
+        tokens (list[str]): 音符、结构符号和小节线词元。
+
+    Returns:
+        str: 具有稳定空格和换行的曲谱正文。
+    """
+
+    lines: list[str] = []
+    current: list[str] = []
+    bars = 0
+    for token in tokens:
+        current.append(token)
+        if token == "|":
+            bars += 1
+            if bars % 4 == 0:
+                lines.append(" ".join(current))
+                current = []
+    if current:
+        lines.append(" ".join(current))
+    return "\n".join(lines)
+
+
 def validate_document(document: ScoreDocument) -> None:
     """
     校验可编辑文档能否由当前顺序曲谱格式表达。
@@ -276,8 +317,19 @@ def serialize_document(document: ScoreDocument) -> str:
     validate_document(document)
     tokens: list[str] = []
     cursor = Fraction(0)
+    measure = _measure_beats(document.beat)
+    next_bar = measure
     in_legato = False
     groups = sorted(document.groups, key=lambda item: item.start_beat)
+
+    def append_bars() -> None:
+        """在当前时间位置补齐已经越过的小节线。"""
+
+        nonlocal next_bar
+        while cursor >= next_bar:
+            tokens.append("|")
+            next_bar += measure
+
     for group in groups:
         if group.start_beat > cursor:
             if in_legato:
@@ -285,6 +337,7 @@ def serialize_document(document: ScoreDocument) -> str:
                 in_legato = False
             tokens.append(_unit_text("0", group.start_beat - cursor))
             cursor = group.start_beat
+            append_bars()
         if group.legato_to_next and not in_legato:
             tokens.append("(")
             in_legato = True
@@ -295,20 +348,22 @@ def serialize_document(document: ScoreDocument) -> str:
         if in_legato and not group.legato_to_next:
             tokens.append(")")
             in_legato = False
+        append_bars()
     if in_legato:
         tokens.append(")")
     if document.total_beats > cursor:
         tokens.append(_unit_text("0", document.total_beats - cursor))
+        cursor = document.total_beats
+        append_bars()
     if not tokens:
         tokens.append("0")
 
-    lines = [" ".join(tokens[index : index + 12]) for index in range(0, len(tokens), 12)]
     text = (
         f"@title {document.title.strip()}\n"
         f"@bpm {document.bpm}\n"
         f"@beat {document.beat}\n"
         "@section_gap 1\n\n"
-        + "\n".join(lines)
+        + _format_body(tokens)
         + "\n"
     )
     parse_score(text)

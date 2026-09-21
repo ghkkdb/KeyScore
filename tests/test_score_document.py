@@ -96,6 +96,21 @@ class ScoreDocumentTests(unittest.TestCase):
         self.assertFalse(result.groups[0].legato_to_next)
         parse_score(serialize_document(result))
 
+    def test_serialization_formats_measures_and_four_bar_lines(self) -> None:
+        """卷帘转文本应按拍号插入小节线，并每四小节换行。"""
+
+        document = document_from_text("@beat 4/4\n" + " ".join(["1"] * 20))
+        body = serialize_document(document).split("\n\n", maxsplit=1)[1]
+        lines = body.strip().splitlines()
+
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0].count("|"), 4)
+        self.assertEqual(lines[1].count("|"), 1)
+        self.assertEqual(
+            parse_score(serialize_document(document)).total_beats,
+            Fraction(20),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

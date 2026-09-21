@@ -233,6 +233,9 @@ class SettingsPageTests(unittest.TestCase):
                 window.play_hotkey_edit.setKeySequence(QKeySequence("Alt+P"))
                 window.stop_hotkey_edit.setKeySequence(QKeySequence("Shift+F10"))
                 window.duration_hotkey_edit.setKeySequence(QKeySequence("Ctrl+D"))
+                window.duration_reverse_hotkey_edit.setKeySequence(
+                    QKeySequence("Ctrl+A")
+                )
                 window.duration_presets_edit.setText("1/8, 1/2, 3/4, 1, 3")
                 window.default_duration_edit.setText("3/4")
                 with patch.object(window.hotkeys, "configure", return_value=True):
@@ -243,6 +246,7 @@ class SettingsPageTests(unittest.TestCase):
                 self.assertEqual(settings.play_hotkey, "Alt+P")
                 self.assertEqual(settings.stop_hotkey, "Shift+F10")
                 self.assertEqual(settings.duration_cycle_hotkey, "Ctrl+D")
+                self.assertEqual(settings.duration_reverse_hotkey, "Ctrl+A")
                 self.assertEqual(settings.default_note_duration, "3/4")
                 self.assertEqual(settings.duration_presets[-1], "3")
                 self.assertIn("Ctrl+F8 录制", window.shortcut_hint.text())

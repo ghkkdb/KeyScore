@@ -314,6 +314,39 @@ class PianoRollTests(unittest.TestCase):
                 self.assertEqual(window.duration_combo.currentData(), "3")
                 window._cycle_note_duration()
                 self.assertEqual(window.duration_combo.currentData(), "1/8")
+                window._cycle_note_duration_reverse()
+                self.assertEqual(window.duration_combo.currentData(), "3")
+            finally:
+                window.editor.document().setModified(False)
+                window.close()
+
+    def test_window_undo_still_works_after_duration_switch(self) -> None:
+        """切换新音符拍数后，窗口级 Ctrl+Z 仍应撤销卷帘编辑。"""
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "test.txt"
+            path.write_text("@title 快捷撤销\n1 2", encoding="utf-8")
+            window = ScoreEditorWindow(path)
+            try:
+                note_item = next(
+                    item for item in window.roll_editor.scene().items() if item.toolTip()
+                )
+                note_item.setSelected(True)
+                window.roll_editor.delete_selected_notes()
+                window._cycle_note_duration()
+                window.show()
+                window.duration_combo.setFocus()
+                self.application.processEvents()
+                QTest.keyClick(
+                    window.duration_combo,
+                    Qt.Key.Key_Z,
+                    Qt.KeyboardModifier.ControlModifier,
+                )
+                self.application.processEvents()
+
+                document = window.roll_editor.score_document()
+                assert document is not None
+                self.assertEqual(len(document.groups), 2)
             finally:
                 window.editor.document().setModified(False)
                 window.close()

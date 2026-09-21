@@ -27,6 +27,7 @@ class AppSettings:
     play_hotkey: str = "F9"
     stop_hotkey: str = "F10"
     duration_cycle_hotkey: str = "D"
+    duration_reverse_hotkey: str = "A"
     duration_presets: tuple[str, ...] = ("1/4", "1/2", "3/4", "1", "2", "4")
     default_note_duration: str = "1"
     score_sort_mode: str = "modified"
@@ -164,13 +165,23 @@ def load_app_settings(path: Path) -> AppSettings:
         duration_cycle_hotkey = _read_hotkey(
             payload, "duration_cycle_hotkey", defaults.duration_cycle_hotkey
         )
+        duration_reverse_hotkey = _read_hotkey(
+            payload, "duration_reverse_hotkey", defaults.duration_reverse_hotkey
+        )
         if len(
-            {record_hotkey, play_hotkey, stop_hotkey, duration_cycle_hotkey}
-        ) != 4:
+            {
+                record_hotkey,
+                play_hotkey,
+                stop_hotkey,
+                duration_cycle_hotkey,
+                duration_reverse_hotkey,
+            }
+        ) != 5:
             record_hotkey = defaults.record_hotkey
             play_hotkey = defaults.play_hotkey
             stop_hotkey = defaults.stop_hotkey
             duration_cycle_hotkey = defaults.duration_cycle_hotkey
+            duration_reverse_hotkey = defaults.duration_reverse_hotkey
         duration_presets, default_note_duration = _read_duration_presets(
             payload, defaults
         )
@@ -194,6 +205,7 @@ def load_app_settings(path: Path) -> AppSettings:
             play_hotkey=play_hotkey,
             stop_hotkey=stop_hotkey,
             duration_cycle_hotkey=duration_cycle_hotkey,
+            duration_reverse_hotkey=duration_reverse_hotkey,
             duration_presets=duration_presets,
             default_note_duration=default_note_duration,
             score_sort_mode=score_sort_mode,

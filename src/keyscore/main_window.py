@@ -730,17 +730,27 @@ class MainWindow(FramelessMainWindow):
         self.duration_hotkey_edit.setMaximumSequenceLength(1)
         self.duration_hotkey_edit.setMinimumSize(200, 38)
         shortcuts_layout.addWidget(self.duration_hotkey_edit, 6, 1)
-        shortcuts_layout.addWidget(QLabel("常用拍数"), 7, 0)
+        shortcuts_layout.addWidget(QLabel("反向切换新音符拍数"), 7, 0)
+        self.duration_reverse_hotkey_edit = QKeySequenceEdit(
+            QKeySequence(
+                self.app_settings.duration_reverse_hotkey.replace("Win+", "Meta+")
+            )
+        )
+        self.duration_reverse_hotkey_edit.setObjectName("shortcutEditor")
+        self.duration_reverse_hotkey_edit.setMaximumSequenceLength(1)
+        self.duration_reverse_hotkey_edit.setMinimumSize(200, 38)
+        shortcuts_layout.addWidget(self.duration_reverse_hotkey_edit, 7, 1)
+        shortcuts_layout.addWidget(QLabel("常用拍数"), 8, 0)
         self.duration_presets_edit = QLineEdit(
             ", ".join(self.app_settings.duration_presets)
         )
         self.duration_presets_edit.setPlaceholderText("例如：1/4, 1/2, 3/4, 1, 2, 4")
         self.duration_presets_edit.setToolTip("使用逗号分隔；列表顺序也是快捷键循环顺序")
-        shortcuts_layout.addWidget(self.duration_presets_edit, 7, 1)
-        shortcuts_layout.addWidget(QLabel("默认新音符拍数"), 8, 0)
+        shortcuts_layout.addWidget(self.duration_presets_edit, 8, 1)
+        shortcuts_layout.addWidget(QLabel("默认新音符拍数"), 9, 0)
         self.default_duration_edit = QLineEdit(self.app_settings.default_note_duration)
         self.default_duration_edit.setPlaceholderText("例如：1 或 3/4")
-        shortcuts_layout.addWidget(self.default_duration_edit, 8, 1)
+        shortcuts_layout.addWidget(self.default_duration_edit, 9, 1)
         buttons = QHBoxLayout()
         buttons.addStretch()
         restore_button = QPushButton("恢复默认")
@@ -749,14 +759,14 @@ class MainWindow(FramelessMainWindow):
         save_button.clicked.connect(self._save_hotkey_settings)
         buttons.addWidget(restore_button)
         buttons.addWidget(save_button)
-        shortcuts_layout.addLayout(buttons, 9, 0, 1, 2)
+        shortcuts_layout.addLayout(buttons, 10, 0, 1, 2)
         shortcut_hint = QLabel(
-            "快捷键支持单键或 Ctrl / Alt / Shift / Win 组合；四项不能重复。"
+            "快捷键支持单键或 Ctrl / Alt / Shift / Win 组合；五项不能重复。"
             "拍数支持整数、小数和分数，使用逗号分隔。",
             objectName="muted",
         )
         shortcut_hint.setWordWrap(True)
-        shortcuts_layout.addWidget(shortcut_hint, 10, 0, 1, 2)
+        shortcuts_layout.addWidget(shortcut_hint, 11, 0, 1, 2)
         shortcuts_layout.setColumnStretch(0, 1)
         shortcuts_layout.setColumnStretch(1, 1)
         shortcuts_layout.setColumnMinimumWidth(1, 200)
@@ -1227,6 +1237,9 @@ class MainWindow(FramelessMainWindow):
         self.duration_hotkey_edit.setKeySequence(
             QKeySequence(settings.duration_cycle_hotkey.replace("Win+", "Meta+"))
         )
+        self.duration_reverse_hotkey_edit.setKeySequence(
+            QKeySequence(settings.duration_reverse_hotkey.replace("Win+", "Meta+"))
+        )
         self.duration_presets_edit.setText(", ".join(settings.duration_presets))
         self.default_duration_edit.setText(settings.default_note_duration)
 
@@ -1246,7 +1259,18 @@ class MainWindow(FramelessMainWindow):
             play_hotkey = self._hotkey_text(self.play_hotkey_edit)
             stop_hotkey = self._hotkey_text(self.stop_hotkey_edit)
             duration_hotkey = self._hotkey_text(self.duration_hotkey_edit)
-            if len({record_hotkey, play_hotkey, stop_hotkey, duration_hotkey}) != 4:
+            duration_reverse_hotkey = self._hotkey_text(
+                self.duration_reverse_hotkey_edit
+            )
+            if len(
+                {
+                    record_hotkey,
+                    play_hotkey,
+                    stop_hotkey,
+                    duration_hotkey,
+                    duration_reverse_hotkey,
+                }
+            ) != 5:
                 raise HotkeyValidationError("全局快捷键和编辑器快捷键不能重复")
             raw_presets = self.duration_presets_edit.text().replace("，", ",").split(",")
             duration_presets: list[str] = []
@@ -1285,6 +1309,7 @@ class MainWindow(FramelessMainWindow):
             play_hotkey=play_hotkey,
             stop_hotkey=stop_hotkey,
             duration_cycle_hotkey=duration_hotkey,
+            duration_reverse_hotkey=duration_reverse_hotkey,
             duration_presets=tuple(duration_presets),
             default_note_duration=default_duration,
         )
@@ -1307,6 +1332,7 @@ class MainWindow(FramelessMainWindow):
                 updated.duration_presets,
                 updated.default_note_duration,
                 updated.duration_cycle_hotkey,
+                updated.duration_reverse_hotkey,
             )
         self.statusBar().showMessage("快捷键和编辑器拍数已保存并立即生效")
 
@@ -1973,6 +1999,7 @@ class MainWindow(FramelessMainWindow):
                 self.app_settings.duration_presets,
                 self.app_settings.default_note_duration,
                 self.app_settings.duration_cycle_hotkey,
+                self.app_settings.duration_reverse_hotkey,
                 initial_text,
                 save_new,
             )
