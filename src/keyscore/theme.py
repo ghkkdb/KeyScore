@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QEvent, QObject, QRectF, Qt, Signal
+from PySide6.QtGui import QPainterPath, QRegion
 from PySide6.QtWidgets import QApplication, QWidget
 
 from .app_settings import ThemeId
@@ -53,8 +54,12 @@ QLabel#sectionLabel { color: #607086; font-size: 13px; font-weight: 600; }
 QLabel#muted, QLabel[state="normal"] { color: #66758A; }
 QLabel#sidebarVersion { color: #7990AD; font-size: 11px; }
 QLabel#navigationHint {
-    background: #203959; color: #FFFFFF; border: none; border-radius: 7px;
+    background: #203959; color: #FFFFFF; border: none; border-radius: 10px;
     padding: 6px 10px; font-size: 13px; font-weight: 600;
+}
+QLabel#successToast {
+    background: #E7F7ED; color: #137333; border: 1px solid #A9DDB9;
+    border-radius: 12px; padding: 10px 18px; font-size: 14px; font-weight: 700;
 }
 QLabel#commandDivider { color: #B5C8DC; font-size: 20px; }
 QLabel[state="warning"] { color: #986A00; }
@@ -103,6 +108,10 @@ QPushButton#primary {
     color: #FFFFFF; border: 1px solid #1A8EED; font-weight: 700;
 }
 QPushButton#primary:hover { background: #118AF5; border-color: #0875DE; }
+QPushButton#editMode { padding: 7px 12px; }
+QPushButton#editMode:checked {
+    background: #D8EAFF; color: #0875DC; border: 1px solid #1684EA;
+}
 QPushButton#record { color: #263D61; }
 QPushButton#record:hover { color: #D9364E; border-color: #F0A3AE; }
 QPushButton#binding { background: rgba(255, 255, 255, 220); border: 1px solid #D2DFEC; text-align: left; }
@@ -173,7 +182,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar:horizontal { background: transparent; height: 9px; margin: 2px 3px; }
 QScrollBar::handle:horizontal { background: #B4C5D7; border-radius: 4px; min-width: 30px; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
-QToolTip { background: #FFFFFF; color: #213B60; border: 1px solid #D4E2EF; border-radius: 9px; padding: 7px 10px; }
+QToolTip { background: #FFFFFF; color: #213B60; border: 1px solid #D4E2EF; border-radius: 10px; padding: 7px 10px; }
 QFrame#overlayCard { background: rgba(248, 251, 255, 244); border: 1px solid rgba(185, 199, 214, 220); border-radius: 16px; }
 QFrame#overlayCard QLabel { color: #17233C; }
 QFrame#overlayCard QLabel#muted { color: #66758A; }
@@ -213,8 +222,12 @@ QLabel#sectionLabel { color: #8295B7; font-size: 13px; font-weight: 600; }
 QLabel#muted, QLabel[state="normal"] { color: #8093B5; }
 QLabel#sidebarVersion { color: #597294; font-size: 11px; }
 QLabel#navigationHint {
-    background: #162746; color: #EAFBFF; border: 1px solid #315478; border-radius: 7px;
+    background: #162746; color: #EAFBFF; border: 1px solid #315478; border-radius: 10px;
     padding: 6px 10px; font-size: 13px; font-weight: 600;
+}
+QLabel#successToast {
+    background: #0B2B2A; color: #77F4B2; border: 1px solid #24C984;
+    border-radius: 12px; padding: 10px 18px; font-size: 14px; font-weight: 700;
 }
 QLabel#commandDivider { color: #315478; font-size: 20px; }
 QLabel[state="warning"] { color: #FFB52E; }
@@ -260,6 +273,10 @@ QPushButton:pressed { background: #18355B; }
 QPushButton:disabled { background: #0B1020; color: #4E5C75; border-color: #17233A; }
 QPushButton#primary { background: #123B5E; color: #A8F6FF; border: 1px solid #00D9FF; font-weight: 700; }
 QPushButton#primary:hover { background: #0A3D5D; border-color: #74EEFF; }
+QPushButton#editMode { padding: 7px 12px; }
+QPushButton#editMode:checked {
+    background: #32205E; color: #73EAFF; border: 1px solid #00BDEB;
+}
 QPushButton#binding { background: #0B1429; border: 1px solid #263F70; text-align: left; }
 QProgressBar { background: #172443; border: none; border-radius: 3px; min-height: 6px; max-height: 6px; }
 QProgressBar::chunk { background: #00D9FF; border-radius: 3px; }
@@ -327,7 +344,7 @@ QScrollBar:horizontal { background: transparent; height: 9px; margin: 2px 3px; }
 QScrollBar::handle:horizontal { background: #244B7E; border-radius: 4px; min-width: 30px; }
 QScrollBar::handle:horizontal:hover { background: #34649D; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
-QToolTip { background: #101C35; color: #CFF8FF; border: 1px solid #00AEDA; border-radius: 9px; padding: 7px 10px; }
+QToolTip { background: #101C35; color: #CFF8FF; border: 1px solid #00AEDA; border-radius: 10px; padding: 7px 10px; }
 QFrame#overlayCard { background: rgba(7, 13, 29, 244); border: 1px solid #00BDEB; border-radius: 16px; }
 QFrame#overlayCard QLabel { color: #EAF4FF; }
 QFrame#overlayCard QLabel#muted { color: #8093B5; }
@@ -365,6 +382,32 @@ def set_widget_state(widget: QWidget, state: str) -> None:
     widget.update()
 
 
+class _RoundedToolTipFilter(QObject):
+    """为所有 Qt 顶层工具提示应用真实圆角窗口遮罩。"""
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        """
+        在工具提示显示或改变尺寸时刷新十像素圆角遮罩。
+
+        Args:
+            watched (QObject): 当前接收事件的 Qt 对象。
+            event (QEvent): 应用级事件。
+
+        Returns:
+            bool: 始终为 `False`，不拦截原始工具提示事件。
+        """
+
+        if (
+            event.type() in {QEvent.Type.Show, QEvent.Type.Resize}
+            and isinstance(watched, QWidget)
+            and watched.windowType() == Qt.WindowType.ToolTip
+        ):
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(watched.rect()), 10.0, 10.0)
+            watched.setMask(QRegion(path.toFillPolygon().toPolygon()))
+        return False
+
+
 class ThemeManager(QObject):
     """在运行时为整个 QApplication 切换主题。"""
 
@@ -381,6 +424,15 @@ class ThemeManager(QObject):
 
         super().__init__(application)
         self._application = application
+        tooltip_filter = application.findChild(
+            _RoundedToolTipFilter,
+            "keyscoreRoundedToolTipFilter",
+        )
+        if tooltip_filter is None:
+            tooltip_filter = _RoundedToolTipFilter(application)
+            tooltip_filter.setObjectName("keyscoreRoundedToolTipFilter")
+            application.installEventFilter(tooltip_filter)
+        self._tooltip_filter = tooltip_filter
         self._current = theme
         self.apply(theme)
 

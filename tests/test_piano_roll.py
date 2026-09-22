@@ -115,6 +115,135 @@ class PianoRollTests(unittest.TestCase):
         self.assertEqual(view._snap(0.26), Fraction(1, 4))
         self.assertEqual(view._snap(0.49), Fraction(1, 4))
 
+    def test_draw_mode_drag_creates_grid_snapped_note_and_can_undo(self) -> None:
+        """绘制模式横向拖动应生成吸附网格的音符并支持一次撤销。"""
+
+        view = PianoRollEditor(editable=True)
+        view.resize(720, 460)
+        view.set_grid(Fraction(1, 4))
+        view.set_score_document(document_from_text("@title 拖拽绘制\n1"))
+        view.set_draw_mode(True)
+        view.show()
+        self.application.processEvents()
+        pitch = RollPitch(Octave.MIDDLE, 4)
+        row = 59 - pitch_index(pitch)
+        start = view.mapFromScene(
+            QPointF(
+                view._keyboard_width + 4 * view._pixels_per_beat,
+                view._ruler_height + (row + 0.5) * view._row_height,
+            )
+        )
+        end = view.mapFromScene(
+            QPointF(
+                view._keyboard_width + 5.5 * view._pixels_per_beat,
+                view._ruler_height + (row + 0.5) * view._row_height,
+            )
+        )
+
+        QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(view.viewport(), end)
+        QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=end)
+        self.application.processEvents()
+
+        document = view.score_document()
+        assert document is not None
+        drawn = next(group for group in document.groups if group.start_beat == 4)
+        self.assertEqual(drawn.duration_beats, Fraction(3, 2))
+        self.assertIn(pitch, drawn.pitches)
+
+        view.undo_stack.undo()
+        self.assertFalse(
+            any(group.start_beat == 4 for group in view.score_document().groups)
+        )
+        view.close()
+
+    def test_select_mode_keeps_marquee_and_alt_temporarily_draws(self) -> None:
+        """选择模式普通拖动不得加音符，按住 Alt 时应临时切换为绘制。"""
+
+        view = PianoRollEditor(editable=True)
+        view.resize(720, 460)
+        view.set_grid(Fraction(1, 4))
+        view.set_score_document(document_from_text("@title 模式分流\n1"))
+        view.show()
+        self.application.processEvents()
+        pitch = RollPitch(Octave.MIDDLE, 5)
+        row = 59 - pitch_index(pitch)
+        start = view.mapFromScene(
+            QPointF(
+                view._keyboard_width + 4 * view._pixels_per_beat,
+                view._ruler_height + (row + 0.5) * view._row_height,
+            )
+        )
+        end = view.mapFromScene(
+            QPointF(
+                view._keyboard_width + 5 * view._pixels_per_beat,
+                view._ruler_height + (row + 0.5) * view._row_height,
+            )
+        )
+        original_count = len(view.score_document().groups)
+
+        QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(view.viewport(), end)
+        QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=end)
+        self.assertEqual(len(view.score_document().groups), original_count)
+
+        QTest.mousePress(
+            view.viewport(),
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.AltModifier,
+            start,
+        )
+        QTest.mouseMove(view.viewport(), end)
+        QTest.mouseRelease(
+            view.viewport(),
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.AltModifier,
+            end,
+        )
+        self.application.processEvents()
+
+        self.assertTrue(
+            any(group.start_beat == 4 for group in view.score_document().groups)
+        )
+        view.close()
+
+    def test_draw_mode_alt_temporarily_restores_marquee(self) -> None:
+        """绘制模式按住 Alt 拖动时应保留框选行为而不创建音符。"""
+
+        view = PianoRollEditor(editable=True)
+        view.resize(720, 460)
+        view.set_score_document(document_from_text("@title 临时框选\n1"))
+        view.set_draw_mode(True)
+        view.show()
+        self.application.processEvents()
+        note_item = next(item for item in view.scene().items() if item.toolTip())
+        note_rect = note_item.sceneBoundingRect()
+        start = view.mapFromScene(
+            QPointF(note_rect.left() + 1.0, note_rect.top() - 6.0)
+        )
+        end = view.mapFromScene(
+            QPointF(note_rect.right() + 6.0, note_rect.bottom() + 6.0)
+        )
+        original = view.score_document()
+
+        QTest.mousePress(
+            view.viewport(),
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.AltModifier,
+            start,
+        )
+        QTest.mouseMove(view.viewport(), end)
+        QTest.mouseRelease(
+            view.viewport(),
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.AltModifier,
+            end,
+        )
+
+        self.assertEqual(view.score_document(), original)
+        self.assertTrue(note_item.isSelected())
+        view.close()
+
     def test_filled_editing_canvas_appends_three_cells_and_scrolls_right(self) -> None:
         """占满尾格后应追加三个当前网格，并自动移动到新尾部。"""
 
@@ -316,6 +445,59 @@ class PianoRollTests(unittest.TestCase):
                 self.assertEqual(window.duration_combo.currentData(), "1/8")
                 window._cycle_note_duration_reverse()
                 self.assertEqual(window.duration_combo.currentData(), "3")
+            finally:
+                window.editor.document().setModified(False)
+                window.close()
+
+    def test_editor_default_new_note_duration_is_quarter_beat(self) -> None:
+        """未传入自定义设置时，新音符应默认使用四分之一拍。"""
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "test.txt"
+            path.write_text("@title 默认拍数\n1", encoding="utf-8")
+            window = ScoreEditorWindow(path)
+            try:
+                self.assertEqual(window.duration_combo.currentData(), "1/4")
+                self.assertEqual(window.roll_editor._default_duration, Fraction(1, 4))
+            finally:
+                window.editor.document().setModified(False)
+                window.close()
+
+    def test_editor_mode_buttons_switch_canvas_operation(self) -> None:
+        """编辑器的选择和绘制按钮应互斥并同步卷帘光标模式。"""
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "test.txt"
+            path.write_text("@title 模式按钮\n1", encoding="utf-8")
+            window = ScoreEditorWindow(path)
+            try:
+                window.resize(window.minimumSize())
+                window.show()
+                self.application.processEvents()
+                self.assertTrue(window.select_mode_button.isChecked())
+                self.assertFalse(window.roll_editor._draw_mode)
+                self.assertGreaterEqual(
+                    window.select_mode_button.width(),
+                    window.select_mode_button.minimumSizeHint().width(),
+                )
+                self.assertGreaterEqual(
+                    window.draw_mode_button.width(),
+                    window.draw_mode_button.minimumSizeHint().width(),
+                )
+
+                window.draw_mode_button.click()
+                self.assertTrue(window.draw_mode_button.isChecked())
+                self.assertFalse(window.select_mode_button.isChecked())
+                self.assertTrue(window.roll_editor._draw_mode)
+                self.assertGreaterEqual(window.draw_mode_button.width(), 116)
+                self.assertGreaterEqual(window.draw_mode_button.height(), 40)
+                self.assertEqual(
+                    window.roll_editor.viewport().cursor().shape(),
+                    Qt.CursorShape.SizeHorCursor,
+                )
+
+                window.select_mode_button.click()
+                self.assertFalse(window.roll_editor._draw_mode)
             finally:
                 window.editor.document().setModified(False)
                 window.close()

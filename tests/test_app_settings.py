@@ -23,7 +23,7 @@ class AppSettingsTests(TestCase):
         self.assertEqual(settings.duration_cycle_hotkey, "D")
         self.assertEqual(settings.duration_reverse_hotkey, "A")
         self.assertIn("3/4", settings.duration_presets)
-        self.assertEqual(settings.default_note_duration, "1")
+        self.assertEqual(settings.default_note_duration, "1/4")
         self.assertTrue(settings.show_playback_overlay)
         self.assertEqual(settings.countdown_seconds, 3)
         self.assertTrue(settings.show_countdown_overlay)

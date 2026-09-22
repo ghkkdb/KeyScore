@@ -95,6 +95,9 @@ class SettingsPageTests(unittest.TestCase):
                 self.assertTrue(window.playback_overlay_check.isChecked())
                 self.assertEqual(window.countdown_seconds_spin.value(), 3)
                 self.assertTrue(window.countdown_overlay_check.isChecked())
+                self.assertEqual(window.default_duration_edit.text(), "1/4")
+                self.assertTrue(window.app_status_bar.isHidden())
+                self.assertFalse(window.app_status_bar.isVisible())
                 self.assertGreaterEqual(window.record_hotkey_edit.minimumWidth(), 200)
                 self.assertFalse(window.score_sort_button.icon().isNull())
                 self.assertFalse(window.score_sort_button.toolTip())
@@ -119,6 +122,23 @@ class SettingsPageTests(unittest.TestCase):
                 self.assertNotIn("游戏演奏按键", labels)
             finally:
                 window.close()
+
+    def test_standard_tooltips_receive_a_rounded_window_mask(self) -> None:
+        """所有标准工具提示窗口都应应用真实圆角遮罩。"""
+
+        manager = ThemeManager(self.application, ThemeId.FLUENT)
+        tooltip = QLabel("圆角提示", None, Qt.WindowType.ToolTip)
+        try:
+            tooltip.resize(120, 40)
+            tooltip.show()
+            self.application.processEvents()
+
+            self.assertFalse(tooltip.mask().isEmpty())
+            self.assertEqual(tooltip.mask().boundingRect(), tooltip.rect())
+            self.assertIn("border-radius: 10px", self.application.styleSheet())
+        finally:
+            tooltip.close()
+            manager.deleteLater()
 
     def test_new_score_stays_in_memory_until_saved(self) -> None:
         """点击新建只应打开含一个中音的草稿，不立即写入曲谱库。"""
@@ -251,6 +271,29 @@ class SettingsPageTests(unittest.TestCase):
                 self.assertEqual(settings.duration_presets[-1], "3")
                 self.assertIn("Ctrl+F8 录制", window.shortcut_hint.text())
                 self.assertIn("Alt+P 播放", window.shortcut_hint.text())
+            finally:
+                window.close()
+
+    def test_profile_save_shows_one_second_success_toast(self) -> None:
+        """方案保存成功后应显示一秒钟并自动隐藏轻提示。"""
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {"KEYSCORE_DATA_DIR": directory},
+        ):
+            manager = ThemeManager(self.application, ThemeId.FLUENT)
+            window = MainWindow(manager, Path(directory) / "app_settings.json")
+            try:
+                profile = default_profile()
+                window._save_profile_changes(profile, profile.name)
+
+                self.assertFalse(window.profile_save_toast.isHidden())
+                self.assertEqual(window.profile_save_toast.text(), "方案保存成功")
+                self.assertTrue(window.profile_save_toast_timer.isActive())
+                self.assertEqual(window.profile_save_toast_timer.interval(), 1000)
+
+                window.profile_save_toast_timer.timeout.emit()
+                self.assertFalse(window.profile_save_toast.isVisible())
             finally:
                 window.close()
 

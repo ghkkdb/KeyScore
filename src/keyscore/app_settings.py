@@ -29,7 +29,7 @@ class AppSettings:
     duration_cycle_hotkey: str = "D"
     duration_reverse_hotkey: str = "A"
     duration_presets: tuple[str, ...] = ("1/4", "1/2", "3/4", "1", "2", "4")
-    default_note_duration: str = "1"
+    default_note_duration: str = "1/4"
     score_sort_mode: str = "modified"
     show_playback_overlay: bool = True
     countdown_seconds: int = 3

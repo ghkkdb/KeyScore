@@ -300,10 +300,29 @@ class MainWindow(FramelessMainWindow):
         self.navigation_hint = QLabel(body_widget, objectName="navigationHint")
         self.navigation_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.navigation_hint.hide()
+        self.profile_save_toast = QLabel(
+            "方案保存成功",
+            body_widget,
+            objectName="successToast",
+        )
+        self.profile_save_toast.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        )
+        self.profile_save_toast.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        toast_shadow = QGraphicsDropShadowEffect(self.profile_save_toast)
+        toast_shadow.setBlurRadius(22)
+        toast_shadow.setOffset(0, 5)
+        toast_shadow.setColor(QColor(22, 58, 94, 80))
+        self.profile_save_toast.setGraphicsEffect(toast_shadow)
+        self.profile_save_toast.hide()
+        self.profile_save_toast_timer = QTimer(self)
+        self.profile_save_toast_timer.setSingleShot(True)
+        self.profile_save_toast_timer.setInterval(1000)
+        self.profile_save_toast_timer.timeout.connect(self.profile_save_toast.hide)
         root.addWidget(body_widget, 1)
-        self.app_status_bar = QStatusBar(objectName="appStatusBar")
+        self.app_status_bar = QStatusBar(self.app_shell, objectName="appStatusBar")
         self.app_status_bar.setSizeGripEnabled(False)
-        root.addWidget(self.app_status_bar)
+        self.app_status_bar.hide()
         self.window_root_layout.addWidget(self.app_shell)
         self.setCentralWidget(window_root)
         self._refresh_hotkey_labels()
@@ -315,10 +334,10 @@ class MainWindow(FramelessMainWindow):
 
     def statusBar(self) -> QStatusBar:
         """
-        返回嵌入圆角窗口外壳的状态栏。
+        返回用于接收内部状态消息的隐藏状态栏。
 
         Returns:
-            QStatusBar: 主窗口底部状态栏。
+            QStatusBar: 不占用主界面空间的状态消息接收器。
         """
 
         if hasattr(self, "app_status_bar"):
@@ -1389,6 +1408,18 @@ class MainWindow(FramelessMainWindow):
         self._refresh_profile_combo()
         self.profile_page.mark_saved(self.profile)
         self.statusBar().showMessage(f"当前配置已保存并生效：{self.profile.name}")
+        self._show_profile_saved_toast()
+
+    def _show_profile_saved_toast(self) -> None:
+        """在主内容区顶部显示一秒钟的方案保存成功提示。"""
+
+        self.profile_save_toast.adjustSize()
+        page_center = self.pages.geometry().center().x()
+        toast_x = page_center - self.profile_save_toast.width() // 2
+        self.profile_save_toast.move(max(8, toast_x), 18)
+        self.profile_save_toast.raise_()
+        self.profile_save_toast.show()
+        self.profile_save_toast_timer.start()
 
     def _start_hotkeys(self) -> None:
         """启动当前配置的三个全局快捷键监听器。"""

@@ -392,6 +392,53 @@ class _NoteItem(QGraphicsRectItem):
         )
 
 
+class _DraftNoteItem(QGraphicsRectItem):
+    """显示拖拽绘制过程中尚未提交的音符及其拍数。"""
+
+    def __init__(self) -> None:
+        """创建置于正式音符上方的半透明预览块。"""
+
+        super().__init__()
+        self.duration_text = ""
+        self.valid = True
+        self.setZValue(20)
+
+    def paint(
+        self,
+        painter: QPainter,
+        option: QStyleOptionGraphicsItem,
+        widget: QWidget | None = None,
+    ) -> None:
+        """
+        绘制带拍数文字的有效或错误预览块。
+
+        Args:
+            painter (QPainter): 场景绘制器。
+            option (QStyleOptionGraphicsItem): 当前图形项状态。
+            widget (QWidget | None): 可选目标控件。
+        """
+
+        del option, widget
+        application = QApplication.instance()
+        dark = application is not None and application.property("theme") == "esports"
+        if self.valid:
+            fill = QColor(0, 189, 235, 118) if dark else QColor(22, 135, 239, 108)
+            border = QColor("#73EAFF" if dark else "#0875DC")
+        else:
+            fill = QColor(255, 59, 130, 118) if dark else QColor(196, 43, 28, 100)
+            border = QColor("#FF78A8" if dark else "#C42B1C")
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(border, 1.6, Qt.PenStyle.DashLine))
+        painter.setBrush(fill)
+        painter.drawRoundedRect(self.rect(), 5, 5)
+        painter.setPen(QColor("#FFFFFF"))
+        painter.drawText(
+            self.rect().adjusted(4, 0, -4, 0),
+            Qt.AlignmentFlag.AlignCenter,
+            self.duration_text,
+        )
+
+
 class _DocumentCommand(QUndoCommand):
     """使用前后文档快照实现卷帘撤销与重做。"""
 
@@ -460,6 +507,16 @@ class PianoRollEditor(QGraphicsView):
         self._playhead_item: QGraphicsLineItem | None = None
         self._hover_beat: Fraction | None = None
         self._hover_pitch: RollPitch | None = None
+        self._draw_mode = False
+        self._drawing_anchor: Fraction | None = None
+        self._drawing_pitch: RollPitch | None = None
+        self._drawing_press_position: QPointF | None = None
+        self._drawing_dragged = False
+        self._draft_item: _DraftNoteItem | None = None
+        self._draft_start = Fraction(0)
+        self._draft_duration = Fraction(0)
+        self._draft_valid = False
+        self._draft_error = ""
         self._undo_stack = QUndoStack(self)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
@@ -595,6 +652,20 @@ class PianoRollEditor(QGraphicsView):
         if duration <= 0:
             raise ValueError("默认时值必须大于 0")
         self._default_duration = duration
+
+    def set_draw_mode(self, enabled: bool) -> None:
+        """
+        在框选和拖拽绘制两种画布操作之间切换。
+
+        Args:
+            enabled (bool): 为 `True` 时空白处拖动用于绘制音符。
+        """
+
+        self._cancel_note_drawing()
+        self._draw_mode = enabled
+        self.viewport().setCursor(
+            Qt.CursorShape.SizeHorCursor if enabled else Qt.CursorShape.CrossCursor
+        )
 
     def set_playhead_beat(
         self,
@@ -965,6 +1036,105 @@ class PianoRollEditor(QGraphicsView):
         self.selection_changed.emit(count)
         self.viewport().update()
 
+    def _preview_note_drawing(
+        self,
+        start: Fraction,
+        duration: Fraction,
+        pitch: RollPitch,
+    ) -> None:
+        """
+        更新拖拽音符的矩形、拍数和有效状态。
+
+        Args:
+            start (Fraction): 量化后的音符起始拍。
+            duration (Fraction): 当前拖拽得到的音符时值。
+            pitch (RollPitch): 按下鼠标时锁定的音高。
+        """
+
+        if self._document is None:
+            return
+        if self._draft_item is None:
+            self._draft_item = _DraftNoteItem()
+            self._scene.addItem(self._draft_item)
+        self._draft_start = start
+        self._draft_duration = duration
+        self._draft_valid = True
+        self._draft_error = ""
+        matching_group = next(
+            (
+                group
+                for group in self._document.groups
+                if group.start_beat == start
+            ),
+            None,
+        )
+        try:
+            if matching_group is not None and matching_group.duration_beats != duration:
+                raise ValueError("同一拍位的和弦音符必须使用相同拍数")
+            add_note(self._document, start, duration, pitch)
+        except ValueError as exc:
+            self._draft_valid = False
+            self._draft_error = str(exc)
+        x = self._keyboard_width + float(start) * self._pixels_per_beat
+        y = (
+            self._ruler_height
+            + (_MAX_PITCH_INDEX - pitch_index(pitch)) * self._row_height
+        )
+        width = max(8.0, float(duration) * self._pixels_per_beat - 2.0)
+        self._draft_item.setRect(
+            QRectF(x + 1.0, y + 2.0, width, self._row_height - 4.0)
+        )
+        duration_text = (
+            str(duration.numerator)
+            if duration.denominator == 1
+            else f"{duration.numerator}/{duration.denominator}"
+        )
+        self._draft_item.duration_text = f"{duration_text} 拍"
+        self._draft_item.valid = self._draft_valid
+        self._draft_item.setToolTip(self._draft_error or f"新音符 {duration_text} 拍")
+        self._draft_item.update()
+
+    def _update_note_drawing(self, scene_position: QPointF) -> None:
+        """
+        根据当前鼠标场景位置计算双向拖拽范围。
+
+        Args:
+            scene_position (QPointF): 鼠标当前场景坐标。
+        """
+
+        if self._drawing_anchor is None or self._drawing_pitch is None:
+            return
+        raw_beat = max(
+            0.0,
+            (scene_position.x() - self._keyboard_width) / self._pixels_per_beat,
+        )
+        if raw_beat >= float(self._drawing_anchor):
+            start = self._drawing_anchor
+            end = max(
+                start + self._grid,
+                self._rounded_extent(Fraction(str(raw_beat))),
+            )
+        else:
+            start = self._snap(raw_beat)
+            end = self._drawing_anchor
+            if end <= start:
+                end = start + self._grid
+        self._preview_note_drawing(start, end - start, self._drawing_pitch)
+
+    def _cancel_note_drawing(self) -> None:
+        """移除尚未提交的拖拽音符并清空绘制状态。"""
+
+        if self._draft_item is not None and self._draft_item.scene() is self._scene:
+            self._scene.removeItem(self._draft_item)
+        self._draft_item = None
+        self._drawing_anchor = None
+        self._drawing_pitch = None
+        self._drawing_press_position = None
+        self._drawing_dragged = False
+        self._draft_valid = False
+        self._draft_error = ""
+        self.viewport().update()
+
     def _layout_overview(self) -> None:
         """让全局预览条始终铺满卷帘顶部预留区域。"""
 
@@ -1088,6 +1258,46 @@ class PianoRollEditor(QGraphicsView):
             painter.setPen(QPen(QColor("#00D9FF" if dark else "#1687EF"), 1.5))
             painter.drawRect(hover_rect)
 
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        """
+        将空白处左键操作分流到框选或音符绘制。
+
+        Args:
+            event (QMouseEvent): 鼠标按下事件。
+        """
+
+        if (
+            not self._editable
+            or self._document is None
+            or event.button() != Qt.MouseButton.LeftButton
+            or event.position().x() < self._keyboard_width
+        ):
+            super().mousePressEvent(event)
+            return
+        scene_position = self.mapToScene(event.position().toPoint())
+        item = self._scene.itemAt(scene_position, self.transform())
+        if isinstance(item, _NoteItem) or scene_position.y() < self._ruler_height:
+            super().mousePressEvent(event)
+            return
+        alt_pressed = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
+        should_draw = self._draw_mode != alt_pressed
+        if not should_draw:
+            super().mousePressEvent(event)
+            return
+        self._scene.clearSelection()
+        self._drawing_anchor = self._snap(
+            (scene_position.x() - self._keyboard_width) / self._pixels_per_beat
+        )
+        self._drawing_pitch = self._scene_pitch(scene_position.y())
+        self._drawing_press_position = QPointF(event.position())
+        self._drawing_dragged = False
+        self._preview_note_drawing(
+            self._drawing_anchor,
+            self._default_duration,
+            self._drawing_pitch,
+        )
+        event.accept()
+
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """
         在编辑模式中预览鼠标当前会落入的拍位和音高网格。
@@ -1096,6 +1306,28 @@ class PianoRollEditor(QGraphicsView):
             event (QMouseEvent): 鼠标移动事件。
         """
 
+        if self._drawing_anchor is not None:
+            if (
+                self._drawing_press_position is not None
+                and abs(event.position().x() - self._drawing_press_position.x())
+                >= QApplication.startDragDistance()
+            ):
+                self._drawing_dragged = True
+            if self._drawing_dragged:
+                scroll_bar = self.horizontalScrollBar()
+                edge_margin = 24.0
+                scroll_step = max(1, round(float(self._grid) * self._pixels_per_beat))
+                if event.position().x() >= self.viewport().width() - edge_margin:
+                    scroll_bar.setValue(scroll_bar.value() + scroll_step)
+                elif event.position().x() <= self._keyboard_width + edge_margin:
+                    scroll_bar.setValue(scroll_bar.value() - scroll_step)
+                self._update_note_drawing(
+                    self.mapToScene(event.position().toPoint())
+                )
+            self._hover_pitch = self._drawing_pitch
+            self.viewport().update()
+            event.accept()
+            return
         if self._editable and event.position().x() >= self._keyboard_width:
             scene_position = self.mapToScene(event.position().toPoint())
             if scene_position.y() >= self._ruler_height:
@@ -1113,6 +1345,41 @@ class PianoRollEditor(QGraphicsView):
             self._hover_pitch = None
             self.viewport().update()
         super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        """
+        松开左键时提交有效的拖拽音符。
+
+        Args:
+            event (QMouseEvent): 鼠标释放事件。
+        """
+
+        if event.button() != Qt.MouseButton.LeftButton or self._drawing_anchor is None:
+            super().mouseReleaseEvent(event)
+            return
+        document = self._document
+        pitch = self._drawing_pitch
+        start = self._draft_start
+        duration = self._draft_duration
+        valid = self._draft_valid
+        error = self._draft_error
+        self._cancel_note_drawing()
+        if document is not None and pitch is not None and valid:
+            try:
+                after = add_note(document, start, duration, pitch)
+            except ValueError as exc:
+                self.edit_error.emit(str(exc))
+            else:
+                self._push_change(after, "绘制音符")
+                added_group = next(
+                    group for group in after.groups if group.start_beat == start
+                )
+                self._extend_editing_canvas_if_needed(
+                    added_group.start_beat + added_group.duration_beats
+                )
+        elif error:
+            self.edit_error.emit(error)
+        event.accept()
 
     def leaveEvent(self, event: QEvent) -> None:
         """
@@ -1172,6 +1439,10 @@ class PianoRollEditor(QGraphicsView):
             event (QKeyEvent): 键盘事件。
         """
 
+        if self._editable and event.key() == Qt.Key.Key_Escape and self._drawing_anchor is not None:
+            self._cancel_note_drawing()
+            event.accept()
+            return
         if self._editable and event.key() in {
             Qt.Key.Key_Delete,
             Qt.Key.Key_Backspace,

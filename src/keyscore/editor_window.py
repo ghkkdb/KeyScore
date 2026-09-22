@@ -9,6 +9,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent, QFont, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -40,7 +41,7 @@ class ScoreEditorWindow(QMainWindow):
         path: Path | None,
         parent: QWidget | None = None,
         duration_presets: tuple[str, ...] = ("1/4", "1/2", "3/4", "1", "2", "4"),
-        default_note_duration: str = "1",
+        default_note_duration: str = "1/4",
         duration_cycle_hotkey: str = "D",
         duration_reverse_hotkey: str = "A",
         initial_text: str | None = None,
@@ -78,7 +79,7 @@ class ScoreEditorWindow(QMainWindow):
         header = QHBoxLayout()
         title = QLabel("曲谱编辑")
         title.setObjectName("dialogTitle")
-        syntax = QLabel("双击添加音符，单击选择后可删除；音符不支持拖动")
+        syntax = QLabel("选择模式可框选；绘制模式按住拖动可直接确定音符拍数")
         syntax.setObjectName("muted")
         header.addWidget(title)
         header.addStretch()
@@ -101,8 +102,23 @@ class ScoreEditorWindow(QMainWindow):
         roll_layout = QVBoxLayout(roll_page)
         roll_layout.setContentsMargins(0, 8, 0, 0)
         roll_layout.setSpacing(10)
+        mode_tools = QHBoxLayout()
+        mode_tools.setSpacing(8)
         roll_tools = QHBoxLayout()
         roll_tools.setSpacing(8)
+        self.select_mode_button = QPushButton("选择 (V)", objectName="editMode")
+        self.draw_mode_button = QPushButton("绘制 (B)", objectName="editMode")
+        self.select_mode_button.setMinimumSize(116, 40)
+        self.draw_mode_button.setMinimumSize(116, 40)
+        self.select_mode_button.setCheckable(True)
+        self.draw_mode_button.setCheckable(True)
+        self.select_mode_button.setChecked(True)
+        self.select_mode_button.setToolTip("空白处拖动框选音符；按住 Alt 可临时绘制")
+        self.draw_mode_button.setToolTip("空白处拖动绘制音符；按住 Alt 可临时框选")
+        self.edit_mode_group = QButtonGroup(self)
+        self.edit_mode_group.setExclusive(True)
+        self.edit_mode_group.addButton(self.select_mode_button)
+        self.edit_mode_group.addButton(self.draw_mode_button)
         self.undo_button = QPushButton("撤销")
         self.redo_button = QPushButton("重做")
         self.undo_button.setToolTip("撤销最近一次添加或删除")
@@ -132,6 +148,12 @@ class ScoreEditorWindow(QMainWindow):
         self.roll_editor.setMinimumHeight(360)
         self.roll_editor.document_changed.connect(self._on_roll_document_changed)
         self.roll_editor.edit_error.connect(self._show_roll_error)
+        self.select_mode_button.toggled.connect(
+            lambda checked: checked and self.roll_editor.set_draw_mode(False)
+        )
+        self.draw_mode_button.toggled.connect(
+            lambda checked: checked and self.roll_editor.set_draw_mode(True)
+        )
         self.undo_button.clicked.connect(self.roll_editor.undo_stack.undo)
         self.redo_button.clicked.connect(self.roll_editor.undo_stack.redo)
         self.roll_editor.undo_stack.canUndoChanged.connect(self.undo_button.setEnabled)
@@ -141,6 +163,9 @@ class ScoreEditorWindow(QMainWindow):
         zoom_in_button.clicked.connect(self.roll_editor.zoom_in)
         self.grid_combo.currentIndexChanged.connect(self._apply_roll_grid)
         self.duration_combo.currentIndexChanged.connect(self._apply_roll_duration)
+        mode_tools.addWidget(self.select_mode_button)
+        mode_tools.addWidget(self.draw_mode_button)
+        mode_tools.addStretch()
         roll_tools.addWidget(self.undo_button)
         roll_tools.addWidget(self.redo_button)
         roll_tools.addWidget(delete_button)
@@ -150,6 +175,7 @@ class ScoreEditorWindow(QMainWindow):
         roll_tools.addStretch()
         roll_tools.addWidget(zoom_out_button)
         roll_tools.addWidget(zoom_in_button)
+        roll_layout.addLayout(mode_tools)
         roll_layout.addLayout(roll_tools)
         roll_layout.addWidget(self.roll_editor, 1)
 
@@ -234,6 +260,12 @@ class ScoreEditorWindow(QMainWindow):
         self.duration_reverse_shortcut.activated.connect(
             self._cycle_note_duration_reverse
         )
+        self.select_mode_shortcut = QShortcut(QKeySequence("V"), self)
+        self.select_mode_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.select_mode_shortcut.activated.connect(self.select_mode_button.click)
+        self.draw_mode_shortcut = QShortcut(QKeySequence("B"), self)
+        self.draw_mode_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.draw_mode_shortcut.activated.connect(self.draw_mode_button.click)
         self.undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
         self.undo_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
         self.undo_shortcut.activated.connect(self.roll_editor.undo_stack.undo)
@@ -396,6 +428,8 @@ class ScoreEditorWindow(QMainWindow):
 
         self.duration_shortcut.setEnabled(index == 0)
         self.duration_reverse_shortcut.setEnabled(index == 0)
+        self.select_mode_shortcut.setEnabled(index == 0)
+        self.draw_mode_shortcut.setEnabled(index == 0)
         self.undo_shortcut.setEnabled(index == 0)
         self.redo_shortcut.setEnabled(index == 0)
         if self._syncing_views:
@@ -415,6 +449,8 @@ class ScoreEditorWindow(QMainWindow):
             self.editor_tabs.blockSignals(False)
             self.duration_shortcut.setEnabled(False)
             self.duration_reverse_shortcut.setEnabled(False)
+            self.select_mode_shortcut.setEnabled(False)
+            self.draw_mode_shortcut.setEnabled(False)
             self.undo_shortcut.setEnabled(False)
             self.redo_shortcut.setEnabled(False)
             self.editor.setFocus()

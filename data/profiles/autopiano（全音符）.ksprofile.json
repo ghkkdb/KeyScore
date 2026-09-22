@@ -5,7 +5,7 @@
   "note_output_mode": "hold",
   "zone_mode": "combination",
   "initial_zone": "middle",
-  "key_hold_ms": 50,
+  "key_hold_ms": 100,
   "key_gap_ms": 10,
   "zone_delay_ms": 35,
   "zone_click_ms": 20,
