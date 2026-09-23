@@ -24,6 +24,7 @@ from keyscore.resources import app_icon_path
 from keyscore.theme import ThemeManager
 from keyscore.profile_store import save_profile
 from keyscore.window_chrome import ProfileSelector, SmoothComboBox, SmoothSpinBox
+from keyscore.windows_privileges import IntegrityComparison
 
 
 class SettingsPageTests(unittest.TestCase):
@@ -294,6 +295,47 @@ class SettingsPageTests(unittest.TestCase):
 
                 window.profile_save_toast_timer.timeout.emit()
                 self.assertFalse(window.profile_save_toast.isVisible())
+            finally:
+                window.close()
+
+    def test_higher_integrity_target_prompts_on_every_attempt(self) -> None:
+        """用户取消后再次操作高权限目标时仍应重新询问。"""
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {"KEYSCORE_DATA_DIR": directory},
+        ):
+            manager = ThemeManager(self.application, ThemeId.FLUENT)
+            window = MainWindow(manager, Path(directory) / "app_settings.json")
+            try:
+                with (
+                    patch(
+                        "keyscore.main_window.compare_window_integrity",
+                        return_value=IntegrityComparison.TARGET_HIGHER,
+                    ),
+                    patch("keyscore.main_window.window_process_id", return_value=9527),
+                    patch.object(
+                        QMessageBox,
+                        "question",
+                        side_effect=(
+                            QMessageBox.StandardButton.Cancel,
+                            QMessageBox.StandardButton.Yes,
+                        ),
+                    ) as question,
+                    patch(
+                        "keyscore.main_window.restart_as_administrator",
+                        return_value=True,
+                    ) as restart,
+                    patch.object(window, "close") as close,
+                ):
+                    self.assertFalse(window._confirm_target_permissions(123))
+                    self.assertFalse(window._confirm_target_permissions(123))
+
+                self.assertEqual(question.call_count, 2)
+                self.assertIsNotNone(window.current_entry)
+                restart.assert_called_once_with(window.current_entry.path)
+                close.assert_called_once()
+                self.assertTrue(window._skip_close_confirmation)
             finally:
                 window.close()
 

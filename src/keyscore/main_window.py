@@ -112,6 +112,12 @@ from .window_chrome import (
     WindowTitleBar,
     painted_icon,
 )
+from .windows_privileges import (
+    IntegrityComparison,
+    compare_window_integrity,
+    restart_as_administrator,
+    window_process_id,
+)
 
 
 class _UiSignals(QObject):
@@ -130,13 +136,21 @@ class _UiSignals(QObject):
 class MainWindow(FramelessMainWindow):
     """提供曲谱歌单、播放预览、按键映射和前台安全保护。"""
 
-    def __init__(self, theme_manager: ThemeManager, app_settings_path: Path) -> None:
+    def __init__(
+        self,
+        theme_manager: ThemeManager,
+        app_settings_path: Path,
+        restarted_elevated: bool = False,
+        startup_score_path: Path | None = None,
+    ) -> None:
         """
         初始化曲谱库、持久化配置、播放器和界面。
 
         Args:
             theme_manager (ThemeManager): 全局主题管理器。
             app_settings_path (Path): 应用级设置文件路径。
+            restarted_elevated (bool): 当前实例是否由权限提示重新启动。
+            startup_score_path (Path | None): 启动后需要恢复选中的曲谱路径。
         """
 
         super().__init__()
@@ -146,6 +160,9 @@ class MainWindow(FramelessMainWindow):
         self.theme_manager = theme_manager
         self.app_settings_path = app_settings_path
         self.app_settings = load_app_settings(app_settings_path)
+        self._restarted_elevated = restarted_elevated
+        self._skip_close_confirmation = False
+        self._unknown_integrity_targets: set[int] = set()
         self.score_title_collator = QCollator(
             QLocale(QLocale.Language.Chinese, QLocale.Country.China)
         )
@@ -207,7 +224,7 @@ class MainWindow(FramelessMainWindow):
 
         self._build_ui()
         self.maximized_changed.connect(self._sync_window_shell)
-        self._refresh_library()
+        self._refresh_library(startup_score_path)
 
         self.focus_timer = QTimer(self)
         self.focus_timer.setInterval(120)
@@ -1837,6 +1854,8 @@ class MainWindow(FramelessMainWindow):
 
         if self.plan is None:
             return
+        if not self._confirm_target_permissions(hwnd):
+            return
         self._waiting_for_foreground = False
         self.target_hwnd = hwnd
         self.statusBar().showMessage("前台保护已启用，正在准备播放")
@@ -1846,6 +1865,71 @@ class MainWindow(FramelessMainWindow):
             self.app_settings.countdown_seconds,
             self.app_settings.show_countdown_overlay,
         )
+
+    def _confirm_target_permissions(self, hwnd: int) -> bool:
+        """
+        确认 KeyScore 有权向目标窗口发送输入，必要时请求管理员重启。
+
+        Args:
+            hwnd (int): 即将用于播放的目标窗口句柄。
+
+        Returns:
+            bool: 当前实例可以继续播放时返回 ``True``。
+        """
+
+        comparison = compare_window_integrity(hwnd)
+        if comparison is IntegrityComparison.COMPATIBLE:
+            return True
+
+        self._waiting_for_foreground = False
+        self.countdown_overlay.cancel()
+        target_identity = window_process_id(hwnd) or hwnd
+        if comparison is IntegrityComparison.UNKNOWN:
+            self.statusBar().showMessage("无法确认目标程序权限，已取消播放")
+            if target_identity not in self._unknown_integrity_targets:
+                self._unknown_integrity_targets.add(target_identity)
+                QMessageBox.warning(
+                    self,
+                    "无法确认目标权限",
+                    "KeyScore 无法读取目标程序的权限级别，因此不能确认是否可以安全发送按键。\n\n"
+                    "目标程序可能受到系统或反作弊保护，请检查双方运行权限后重试。",
+                )
+            return False
+
+        if self._restarted_elevated:
+            QMessageBox.warning(
+                self,
+                "权限仍然不足",
+                "KeyScore 已尝试以管理员身份重启，但目标程序权限仍然更高，无法开始播放。",
+            )
+            return False
+
+        answer = QMessageBox.question(
+            self,
+            "需要管理员权限",
+            "当前目标程序的权限高于 KeyScore，Windows 会阻止模拟按键。\n\n"
+            "是否以管理员身份重新启动 KeyScore？当前曲谱和按键方案会自动恢复。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.statusBar().showMessage("用户取消管理员重启，播放已取消")
+            return False
+        if not self._confirm_discard_profile_changes():
+            self.statusBar().showMessage("请先保存按键方案修改，再重新播放")
+            return False
+
+        resume_path = self.current_entry.path if self.current_entry is not None else None
+        if not restart_as_administrator(resume_path):
+            QMessageBox.warning(
+                self,
+                "无法重新启动",
+                "管理员权限请求被取消或启动失败，KeyScore 将继续以普通权限运行。",
+            )
+            return False
+        self._skip_close_confirmation = True
+        self.close()
+        return False
 
     def _begin_after_countdown(self) -> None:
         """倒计时结束后再次验证前台窗口并开始播放。"""
@@ -2110,7 +2194,10 @@ class MainWindow(FramelessMainWindow):
             event (QCloseEvent): Qt 关闭事件。
         """
 
-        if not self._confirm_discard_profile_changes():
+        if (
+            not self._skip_close_confirmation
+            and not self._confirm_discard_profile_changes()
+        ):
             event.ignore()
             return
         self.hotkeys.stop()

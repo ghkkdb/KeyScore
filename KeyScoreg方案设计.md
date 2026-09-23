@@ -535,6 +535,8 @@ KeyScore
 键盘输出：Windows SendInput + 扫描码
 鼠标输出：Windows SendInput + MOUSEINPUT
 前台检测：GetForegroundWindow
+
+权限检测：通过窗口句柄取得目标进程，并使用进程访问令牌的 `TokenIntegrityLevel` 比较 KeyScore 与目标程序的完整性级别。仅当目标级别更高时询问用户是否通过 UAC 以管理员身份重启；重启参数带回当前曲谱路径，当前 Profile 继续使用已有状态文件恢复。权限无法读取时停止本次播放并给出明确提示，不把未知状态误判为普通权限。用户拒绝管理员重启时只取消当前播放；再次对高权限目标执行播放操作时重新弹出提示。
 ```
 
 播放流程：
